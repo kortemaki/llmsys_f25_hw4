@@ -347,15 +347,57 @@ void launch_attn_softmax_bw(float *out_grad,
   dim3 block_dim(WARP_SIZE, warps_per_block);
   // BEGIN ASSIGN4_1_2
 
+  int float_size = sizeof(float);
+  int grad_size = softmax_len * float_size;
+  int inp_size = softmax_len * rows * float_size;
+
+  float *d_grad, *d_inp;
+  cudaMalloc((void **)&d_grad, grad_size);
+  cudaMalloc((void **)&d_inp, inp_size);
+
+  cudaMemcpy(d_grad, out_grad, grad_size, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_inp, soft_inp, inp_size, cudaMemcpyHostToDevice);
 
   // Launch kernel
   // Hint: use ker_attn_softmax_bw<float, ITERATIONS> depending on softmax_len
+  if (softmax_len <= 32) {
+    ker_attn_softmax_bw<float, 1><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+  } else if (softmax_len <= 64) {
+    ker_attn_softmax_bw<float, 2><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+  } else if (softmax_len <= 128) {
+    ker_attn_softmax_bw<float, 4><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+  } else if (softmax_len <= 256) {
+    ker_attn_softmax_bw<float, 8><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+  } else if (softmax_len <= 384) {
+    ker_attn_softmax_bw<float, 12><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+  } else if (softmax_len <= 512) {
+    ker_attn_softmax_bw<float, 16><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+  } else if (softmax_len <= 768) {
+    ker_attn_softmax_bw<float, 24><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+  } else if (softmax_len <= 1024) {
+    ker_attn_softmax_bw<float, 32><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+  } else if (softmax_len <= 2048) {
+    ker_attn_softmax_bw<float, 64><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+  } else {
+    throw std::runtime_error(
+        "Sequence length greater than 2048 is currently not supported");
+  }
+
 
   // Copy back to the host
+  cudaMemcpy(inp, d_inp, inp_size, cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
 
-
+  // Check CUDA execution
+  cudaError_t err = cudaGetLastError();
+  if (err != cudaSuccess) {
+    fprintf(stderr, "launch_attn_softmax_bw Error: %s\n", cudaGetErrorString(err));
+    exit(EXIT_FAILURE);
+  }
 
   // Free memory on device
+  cudaFree(d_grad);
+  cudaFree(d_inp);
   // END ASSIGN4_1_2
 
 }}
