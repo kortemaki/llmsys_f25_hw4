@@ -5,10 +5,9 @@ from .autodiff import Context
 from .fast_ops import FastOps
 from .cuda_ops import CudaOps
 from .tensor import Tensor
-from .tensor_functions import Function, rand, tensor, tensor_from_numpy
+from .tensor_functions import Function, Mul, rand, tensor, tensor_from_numpy
 import numpy as np
 import math
-
 
 def tile(input: Tensor, kernel: Tuple[int, int]) -> Tuple[Tensor, int, int]:
     """
@@ -26,7 +25,6 @@ def tile(input: Tensor, kernel: Tuple[int, int]) -> Tuple[Tensor, int, int]:
     kh, kw = kernel
     assert height % kh == 0
     assert width % kw == 0
-    # ASSIGN4.3
     new_width = width // kw
     new_height = height // kh
 
@@ -34,7 +32,6 @@ def tile(input: Tensor, kernel: Tuple[int, int]) -> Tuple[Tensor, int, int]:
     x = x.permute(0, 1, 2, 4, 3, 5).contiguous()
     x = x.view(batch, channel, new_height, new_width, kh * kw)
     return x, new_height, new_width
-    # END ASSIGN4.3
 
 
 def avgpool2d(input: Tensor, kernel: Tuple[int, int]) -> Tensor:
@@ -49,10 +46,8 @@ def avgpool2d(input: Tensor, kernel: Tuple[int, int]) -> Tensor:
         Pooled tensor
     """
     batch, channel, height, width = input.shape
-    # ASSIGN4.3
     x, new_height, new_width = tile(input, kernel)
     return x.mean(dim=4).view(batch, channel, new_height, new_width)
-    # END ASSIGN4.3
 
 if numba.cuda.is_available():
     # max_reduce = CudaOps.reduce(operators.max, -1e9)
@@ -83,21 +78,17 @@ class Max(Function):
     @staticmethod
     def forward(ctx: Context, input: Tensor, dim: Tensor) -> Tensor:
         "Forward of max should be max reduction"
-        # ASSIGN4.4
         out = max_reduce(input, int(dim.item()))
         ctx.save_for_backward(input, out)
         return out
-        # END ASSIGN4.4
 
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> Tuple[Tensor, float]:
         "Backward of max should be argmax (see above)"
-        # ASSIGN4.4
         input, out = ctx.saved_values
         return (out == input) * grad_output, 0.0
-        # END ASSIGN4.4
 
-        
+
 def max(input: Tensor, dim: int) -> Tensor:
     return Max.apply(input, input._ensure_tensor(dim))
 
@@ -105,8 +96,6 @@ def max(input: Tensor, dim: int) -> Tensor:
 def softmax(input: Tensor, dim: int) -> Tensor:
     r"""
     Compute the softmax as a tensor.
-
-
 
     $z_i = \frac{e^{x_i}}{\sum_i e^{x_i}}$
 
@@ -117,11 +106,9 @@ def softmax(input: Tensor, dim: int) -> Tensor:
     Returns:
         softmax tensor
     """
-    # ASSIGN4.4
     e = (input - Max.apply(input, tensor([dim]))).exp()
     partition = e.sum(dim=dim)
     return e / partition
-    # END ASSIGN4.4
 
 
 def logsoftmax(input: Tensor, dim: int) -> Tensor:
@@ -139,12 +126,10 @@ def logsoftmax(input: Tensor, dim: int) -> Tensor:
     Returns:
          log of softmax tensor
     """
-    # ASSIGN4.4
     e = input
     mx = Max.apply(e, tensor([dim]))
     lse = (e - mx).exp().sum(dim=dim).log() + mx
     return e - lse
-    # END ASSIGN4.4
 
 
 def maxpool2d(input: Tensor, kernel: Tuple[int, int]) -> Tensor:
@@ -159,10 +144,8 @@ def maxpool2d(input: Tensor, kernel: Tuple[int, int]) -> Tensor:
         Tensor : pooled tensor
     """
     batch, channel, height, width = input.shape
-    # ASSIGN4.4
     x, new_height, new_width = tile(input, kernel)
     return max(x, 4).view(batch, channel, new_height, new_width)
-    # END ASSIGN4.4
 
 
 def dropout(input: Tensor, rate: float, ignore: bool = False) -> Tensor:
@@ -177,40 +160,42 @@ def dropout(input: Tensor, rate: float, ignore: bool = False) -> Tensor:
     Returns:
         tensor with random positions dropped out
     """
-    # ASSIGN4.4
     if ignore:
         return input
     r = rand(input.shape, backend=input.backend)
     drop = rate < r
     return input * drop
-    # END ASSIGN4.4
 
 
 def layer_norm(input: Tensor, eps: float = 1e-5) -> Tensor:
-    # ASSIGN4.4
-    
     # Calculate mean and variance along the last axis (features)
     batch, channel, height, width = input.shape
-    
+
     mean = input.mean(dim=4).view(batch, channel, height, width)
     variance = input.var(dim=4).view(batch, channel, height, width)
-    
+
     input_normalized = (input - mean) / (variance + eps)
     return input_normalized
 
-    # END ASSIGN4.4
 
-
-###############################################################################
-# Assignment 2 Problem 2
-###############################################################################
-
-def GELU(input: Tensor) -> Tensor: 
+def GELU(input: Tensor) -> Tensor:
     """Applies the GELU activation function with 'tanh' approximation element-wise
     https://pytorch.org/docs/stable/generated/torch.nn.GELU.html
     """
-    # COPY FROM ASSIGN2_2
-    raise NotImplementedError
+    return 0.5 * input * (1 + (np.sqrt(2 / math.pi) * (input + 0.044715 * (input ** 3))).tanh())
+
+
+def one_hot(input: Tensor, num_classes: int) -> Tensor:
+    """Takes a Tensor containing indices of shape (*) and returns a tensor of shape (*, num_classes)
+    that contains zeros except a 1 where the index of last dimension matches the corresponding value of the input tensor.
+    This is analogous to torch.nn.functional.one_hot (which contains helpful examples you may want to play around with)
+
+    Hint: You may want to use a combination of np.eye, tensor_from_numpy,
+    """
+    return tensor_from_numpy(
+                np.eye(num_classes)[input.to_numpy().astype(int)],
+                backend=input.backend
+            )
 
 
 def logsumexp(input: Tensor, dim: int) -> Tensor:
@@ -224,36 +209,25 @@ def logsumexp(input: Tensor, dim: int) -> Tensor:
     Returns:
         out : The output tensor with the same number of dimensions as input (equiv. to keepdims=True)
             NOTE: minitorch functions/tensor functions typically keep dimensions if you provide a dimensions.
-    """  
-    # COPY FROM ASSIGN2_2
-    raise NotImplementedError
-
-
-def one_hot(input: Tensor, num_classes: int) -> Tensor:
-    """Takes a Tensor containing indices of shape (*) and returns a tensor of shape (*, num_classes) 
-    that contains zeros except a 1 where the index of last dimension matches the corresponding value of the input tensor.
-    This is analogous to torch.nn.functional.one_hot (which contains helpful examples you may want to play around with)
-
-    Hint: You may want to use a combination of np.eye, tensor_from_numpy, 
     """
-    # COPY FROM ASSIGN2_2
-    raise NotImplementedError
+    ### BEGIN ASSIGN3_1
+    return input.exp().sum(dim).log()
+    ### END ASSIGN3_1
 
 
 def softmax_loss(logits: Tensor, target: Tensor) -> Tensor:
     """Softmax + Cross Entropy Loss function with 'reduction=None'.
     Formula is provided in writeup.
 
-    Args: 
-        logits : (minibatch, C) Tensor of raw logits       
-        target : (minibatch, ) Tensor of true labels 
+    Args:
+        logits : (minibatch, C) Tensor of raw logits
+        target : (minibatch, ) Tensor of true labels
 
-    Returns: 
+    Returns:
         loss : (minibatch, )
     """
-    result = None
-    
-    # COPY FROM ASSIGN2_2
-    raise NotImplementedError
-    
-    return result.view(batch_size, )
+    ### BEGIN ASSIGN3_1
+    z_y_k = Mul.apply(logits, one_hot(target, logits.shape[1])).sum(1)
+    result = logsumexp(logits, 1).view(*target.shape) - z_y_k.view(*target.shape)
+    ### END ASSIGN3_1
+    return result.view(*target.shape)
