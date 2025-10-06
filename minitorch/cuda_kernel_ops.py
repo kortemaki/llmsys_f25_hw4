@@ -425,6 +425,8 @@ class CudaKernelOps(TensorOps):
         to_len,
         stream,
       )
+
+      return soft_inp
       #   END ASSIGN4_1_2
 
     @staticmethod
