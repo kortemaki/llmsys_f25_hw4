@@ -361,23 +361,23 @@ void launch_attn_softmax_bw(float *out_grad,
   // Launch kernel
   // Hint: use ker_attn_softmax_bw<float, ITERATIONS> depending on softmax_len
   if (softmax_len <= 32) {
-    ker_attn_softmax_bw<float, 1><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+    ker_attn_softmax_bw<float, 1><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 64) {
-    ker_attn_softmax_bw<float, 2><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+    ker_attn_softmax_bw<float, 2><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 128) {
-    ker_attn_softmax_bw<float, 4><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+    ker_attn_softmax_bw<float, 4><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 256) {
-    ker_attn_softmax_bw<float, 8><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+    ker_attn_softmax_bw<float, 8><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 384) {
-    ker_attn_softmax_bw<float, 12><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+    ker_attn_softmax_bw<float, 12><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 512) {
-    ker_attn_softmax_bw<float, 16><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+    ker_attn_softmax_bw<float, 16><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 768) {
-    ker_attn_softmax_bw<float, 24><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+    ker_attn_softmax_bw<float, 24><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 1024) {
-    ker_attn_softmax_bw<float, 32><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+    ker_attn_softmax_bw<float, 32><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 2048) {
-    ker_attn_softmax_bw<float, 64><<<grid_dim, block_dim, 0, stream>>>(d_grad, soft_inp, softmax_len);
+    ker_attn_softmax_bw<float, 64><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else {
     throw std::runtime_error(
         "Sequence length greater than 2048 is currently not supported");
@@ -385,7 +385,7 @@ void launch_attn_softmax_bw(float *out_grad,
 
 
   // Copy back to the host
-  cudaMemcpy(inp, d_inp, inp_size, cudaMemcpyDeviceToHost);
+  cudaMemcpy(out_grad, d_grad, grad_size, cudaMemcpyDeviceToHost);
   cudaDeviceSynchronize();
 
   // Check CUDA execution
