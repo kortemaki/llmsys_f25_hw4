@@ -129,7 +129,7 @@ class PowerScalar(Function):
                 The tensor to raise to the power of.
             scalar : Tensor
                 The exponent of shape (1,).
-        
+
         Returns
         -------
             output : Tensor
@@ -143,14 +143,14 @@ class PowerScalar(Function):
         """Calculates the gradient of the input a with respect to grad_output.
         NOTE: miniTorch requires that we two gradients: one for the input tensor and scalar.
         Technically, we should only return one gradient for the tensor since there is no gradient for a constant.
-        
+
         Parameters
         ----------
             ctx : Context
                 The same context used in forward.
             grad_output : Tensor
                 The gradient in the backward pass with respect to the output of forward. (Same shape as forward's output.)
-        
+
         Returns
         -------
             gradients : Tuple[Tensor, float]
@@ -159,7 +159,7 @@ class PowerScalar(Function):
         """
         a, scalar = ctx.saved_values
         grad_a    = None
-        
+
         # COPY FROM ASSIGN3
         raise NotImplementedError
 
@@ -168,7 +168,7 @@ class PowerScalar(Function):
 
 class Tanh(Function):
     @staticmethod
-    def forward(ctx: Context, a: Tensor) -> Tensor: 
+    def forward(ctx: Context, a: Tensor) -> Tensor:
         """Calculates the element-wise tanh of a
         Equivalent to np.tanh(a) in numpy if a is a n-dimensional array.
 
@@ -178,7 +178,7 @@ class Tanh(Function):
                 A context object you can temporarily store values to.
             a : Tensor
                 The tensor to take the tanh of.
-        
+
         Returns
         -------
             output : Tensor
@@ -186,18 +186,18 @@ class Tanh(Function):
         """
         # COPY FROM ASSIGN3
         raise NotImplementedError
-    
+
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> Tensor:
         """Calculates the gradient of the input a with respect to grad_output.
-        
+
         Parameters
         ----------
             ctx : Context
                 The same context used in forward.
             grad_output : Tensor
                 The gradient in the backward pass with respect to the output of forward. (Same shape as forward's output.)
-        
+
         Returns
         -------
             output : Tensor
@@ -372,7 +372,7 @@ class MatMul(Function):
             order = list(range(a.dims))
             order[-2], order[-1] = order[-1], order[-2]
             return a._new(a._tensor.permute(*order))
-        
+
         return (
             grad_output.f.matrix_multiply(grad_output, transpose(t2)),
             grad_output.f.matrix_multiply(transpose(t1), grad_output),
@@ -383,13 +383,15 @@ class Attn_Softmax(Function):
     @staticmethod
     def forward(ctx: Context, inp: Tensor, mask: Tensor) -> Tensor:
       #   BEGIN ASSIGN4_1_1
-      raise NotImplementedError("Need to implement for Assignment 3")
+      ctx.save_for_backward(inp)
+      return inp.backend.attn_softmax_fw(inp, mask)
       #   END ASSIGN4_1_1
 
     @staticmethod
     def backward(ctx: Context, out_grad: Tensor) -> Tensor:
       #   BEGIN ASSIGN4_1_2
-      raise NotImplementedError("Need to implement for Assignment 3")
+      soft_inp = ctx.saved_values
+      return out_grad.backend.attn_softmax_bw(out_grad, soft_inp)
       #   END ASSIGN4_1_2
 
 
@@ -523,7 +525,7 @@ def tensor(
 def tensor_from_numpy(
     ls: Storage, backend: TensorBackend = SimpleBackend, requires_grad: bool = False
 ) -> Tensor:
-    """NOTE: This should ONLY be used to initialize a tensor. 
+    """NOTE: This should ONLY be used to initialize a tensor.
     Any other usage could result in undefined behavior.
     """
     if ls.dtype != datatype:
@@ -532,26 +534,26 @@ def tensor_from_numpy(
     res =  minitorch.Tensor(
         v = minitorch.TensorData(
             ls.flatten(), # Will create a COPY of the numpy array
-            ls.shape, 
+            ls.shape,
             tuple(i // datasize for i in ls.strides)
         ),
         backend=backend
     )
 
     res.requires_grad_(requires_grad)
-    
+
     return res
 
 
 def zeros_tensor_from_numpy(shape, backend: TensorBackend = SimpleBackend):
-    """NOTE: This should ONLY be used to initialize a tensor. 
+    """NOTE: This should ONLY be used to initialize a tensor.
     Any other usage could result in undefined behavior.
     """
     zs = np.zeros(shape).astype(datatype)
     return minitorch.Tensor(
         v = minitorch.TensorData(
             zs.flatten(), # Will create a COPY of the numpy array
-            shape, 
+            shape,
             tuple(i // datasize for i in zs.strides)
         ),
         backend=backend
@@ -559,14 +561,14 @@ def zeros_tensor_from_numpy(shape, backend: TensorBackend = SimpleBackend):
 
 
 def ones_tensor_from_numpy(shape, backend: TensorBackend = SimpleBackend):
-    """NOTE: This should ONLY be used to initialize a tensor. 
+    """NOTE: This should ONLY be used to initialize a tensor.
     Any other usage could result in undefined behavior.
     """
     zs = np.ones(shape).astype(datatype)
     return minitorch.Tensor(
         v = minitorch.TensorData(
             zs.flatten(), # Will create a COPY of the numpy array
-            shape, 
+            shape,
             tuple(i // datasize for i in zs.strides)
         ),
         backend=backend
