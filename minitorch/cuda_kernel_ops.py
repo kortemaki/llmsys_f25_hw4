@@ -46,7 +46,7 @@ fn_map = {
   operators.inv_back: 14,
   operators.is_close: 15,
   operators.max: 16,
-  operators.pow: 17, 
+  operators.pow: 17,
   operators.tanh: 18
 }
 
@@ -76,7 +76,7 @@ class CudaKernelOps(TensorOps):
             ]
 
             lib.tensorMap.restype = None
-            
+
             # assert out.size == a.size, f"zip {out.size}, {a.size}"
 
             lib.tensorMap(
@@ -321,7 +321,7 @@ class CudaKernelOps(TensorOps):
             a = a.contiguous().view(np.prod(a.shape[:-2]), a.shape[-2], a.shape[-1])
         if len(b.shape) > 3:
             b = b.contiguous().view(np.prod(b.shape[:-2]), b.shape[-2], b.shape[-1])
-        
+
         assert a.shape[0] == b.shape[0]
         assert a.shape[0] == out.shape[0]
 
@@ -399,14 +399,32 @@ class CudaKernelOps(TensorOps):
         to_len,
         is_dec_self_attn,
         stream
-      ) 
+      )
 
       return inp
 
     @staticmethod
     def attn_softmax_bw(out_grad: Tensor, soft_inp: Tensor):
       #   BEGIN ASSIGN4_1_2
-      raise("Not implemented")
+      batch_size, nhead, from_len, to_len = soft_inp.shape
+      stream = torch.cuda.current_stream().cuda_stream
+
+      lib_softmax.launch_attn_softmax_bw.argtypes = [
+        np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS'),
+        np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS'),
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_void_p,
+      ]
+      lib_softmax.launch_attn_softmax_bw.restype = None
+
+      lib_softmax.launch_attn_softmax_bw(
+        out_grad._tensor._storage,
+        soft_inp._tensor._storage,
+        batch_size * nhead,
+        to_len,
+        stream,
+      )
       #   END ASSIGN4_1_2
 
     @staticmethod
@@ -414,10 +432,9 @@ class CudaKernelOps(TensorOps):
       #   BEGIN ASSIGN4_2_1
       raise("Not implemented")
       #   END ASSIGN4_2_1
-      
+
     @staticmethod
     def layernorm_bw(out_grad: Tensor, inp: Tensor, gamma: Tensor, beta: Tensor, var: Tensor, mean: Tensor):
       #   BEGIN ASSIGN4_2_2
       raise("Not implemented")
       #   END ASSIGN4_2_2
-      
