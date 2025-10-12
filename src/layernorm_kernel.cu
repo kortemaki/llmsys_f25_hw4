@@ -72,10 +72,12 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
     if (means) means[blockIdx.x] = mean_x;
     vars[blockIdx.x] = variance;
   }
-  ln_res_f4.x = scale_f4.x * (inp_f4[threadIdx.x].x - mean_x) / sigma + bias_f4.x;
-  ln_res_f4.y = scale_f4.y * (inp_f4[threadIdx.x].y - mean_x) / sigma + bias_f4.y;
-  ln_res_f4.z = scale_f4.z * (inp_f4[threadIdx.x].z - mean_x) / sigma + bias_f4.z;
-  ln_res_f4.w = scale_f4.w * (inp_f4[threadIdx.x].w - mean_x) / sigma + bias_f4.w;
+  *ln_res_f4 = make_float4(
+      scale_f4.x * (inp_f4[threadIdx.x].x - mean_x) / sigma + bias_f4.x,
+      scale_f4.y * (inp_f4[threadIdx.x].y - mean_x) / sigma + bias_f4.y,
+      scale_f4.z * (inp_f4[threadIdx.x].z - mean_x) / sigma + bias_f4.z,
+      scale_f4.w * (inp_f4[threadIdx.x].w - mean_x) / sigma + bias_f4.w
+  );
   /// END ASSIGN4_2_1
 }
 
