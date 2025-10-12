@@ -388,10 +388,10 @@ class Attn_Softmax(Function):
       #   END ASSIGN4_1_1
 
     @staticmethod
-    def backward(ctx: Context, out_grad: Tensor) -> Tensor:
+    def backward(ctx: Context, out_grad: Tensor) -> Tuple[Tensor, float]:
       #   BEGIN ASSIGN4_1_2
       soft_inp, = ctx.saved_values
-      return out_grad.backend.attn_softmax_bw(out_grad, soft_inp)
+      return out_grad.backend.attn_softmax_bw(out_grad, soft_inp), 0.0
       #   END ASSIGN4_1_2
 
 
