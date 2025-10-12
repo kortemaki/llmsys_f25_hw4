@@ -432,22 +432,22 @@ class CudaKernelOps(TensorOps):
     @staticmethod
     def layernorm_fw(inp: Tensor, gamma: Tensor, beta: Tensor):
       #   BEGIN ASSIGN4_2_1
-      batch_size, seq_len, hidden_dim = inp.shape
+      batch_size_by_seq_len, hidden_dim = inp.shape
       stream = torch.cuda.current_stream().cuda_stream
 
       lib_layernorm.launch_layernorm.argtypes = [
-          np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS')
-          np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS')
-          np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS')
-          np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS')
-          np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS')
-          np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS')
+          np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS'),
+          np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS'),
+          np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS'),
+          np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS'),
+          np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS'),
+          np.ctypeslib.ndpointer(dtype=datatype, ndim=1, flags='C_CONTIGUOUS'),
           ctypes.c_int,
       ]
       lib_layernorm.launch_layernorm.restype = None
       ln_res = inp.zeros()
-      vars = inp.zeros((batch_size, seq_len))
-      means = inp.zeros((batch_size, seq_len))
+      vars = inp.zeros((batch_size_by_seq_len,))
+      means = inp.zeros((batch_size_by_seq_len,))
 
       lib_layernorm.launch_layernorm(
           ln_res._tensor._storage,
