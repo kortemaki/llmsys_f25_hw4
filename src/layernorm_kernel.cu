@@ -45,14 +45,15 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
   // 3. Compute layernorm result with reinterpret_cast by casting to float4 for speedup
 
   // Step 1
-  float l_sum = 0;
-  float l_sum2 = 0;
+  float l_sum[1];
+  float l_sum2[1];
+  l_sum[0] = 0;
+  l_sum2[0] = 0;
   const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + blockIdx.x * hidden_size;
   for (uint idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
     const float4  val = inp_f4[idx];
-    const float4 val2 = val * val;
-    l_sum +=  val.x +  val.y +  val.z +  val.w;
-    l_sum += val2.x + val2.y + val2.z + val2.w;
+    l_sum  += val.x + val.y + val.z + val.w;
+    l_sum2 += val.x * val.x + val.y * val.y + val.z * val.z + val.w * val.w;
   }
 
   // Step 2
@@ -61,7 +62,7 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
   const float  mean_x =  l_sum / blockDim.x;
   const float mean_x2 = l_sum2 / blockDim.x;
   const float variance = mean_x2 - mean_x * mean_x + LN_EPSILON;
-  const float sigma = (variance) ** 0.5;
+  const float sigma = sqrtf(variance);
 
   // Step 3
   float4 *ln_res_f4 = reinterpret_cast<float4 *>(ln_res) + blockIdx.x * hidden_size + threadIdx.x;
@@ -71,7 +72,7 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
     if (means) means[blockIdx.x] = mean_x;
     vars[blockIdx.x] = variance;
   }
-  *ln_res_f4 = scale_f4 * (val - mean_x) / sigma + bias_f4;
+  *ln_res_f4 = scale_f4 * (inp_f4[threadIdx.x] - mean_x) / sigma + bias_f4;
 
   /// END ASSIGN4_2_1
 }
