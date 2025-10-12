@@ -396,14 +396,15 @@ class LayerNorm(Function):
     def forward(ctx: Context, inp: Tensor, gamma: Tensor, beta: Tensor) -> Tensor:
       #   BEGIN ASSIGN4_2_1
       ln_res, vars, means = inp.backend.layernorm_fw(inp, gamma, beta)
-      ctx.save_for_backward(inp, gamma, vars)
+      ctx.save_for_backward(inp, gamma, beta, vars, means)
       return ln_res
       #   END ASSIGN4_2_1
 
     @staticmethod
     def backward(ctx: Context, out_grad: Tensor) -> Tensor:
       #   BEGIN ASSIGN4_2_2
-      raise NotImplementedError("Need to implement for Assignment 3")
+      inp, gamma, beta, vars, means = ctx.saved_values
+      return out_grad.backend.layernorm_bw(out_grad, inp, gamma, beta, vars, means)
       #   END ASSIGN4_2_2
 
 
