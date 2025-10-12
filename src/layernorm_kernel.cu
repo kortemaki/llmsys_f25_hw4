@@ -202,15 +202,16 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   const uint idx_x = blockDim.x * blockIdx.x + threadIdx.x;
   const uint idx_y = blockDim.y * blockIdx.y + threadIdx.y;
   const uint idx = idx_y * width + idx_x;
+  T xhat;
   if (vars && means) {
-      xhat = (inp[idx] - means[blockIdx.x]) * rsqrt(vars[blockIdx.x]);
-  } elif (gamma && beta) {
+    xhat = (inp[idx] - means[blockIdx.x]) * rsqrt(vars[blockIdx.x]);
+  } else if (gamma && betta) {
     xhat = (output[idx] - betta[blockIdx.x]) / gamma[blockIdx.x];
   } else {
     assert(false && "Error: invalid input! Either both gamma and betta or vars and means must be provided.");
   }
-  l_d_gam = out_grad[idx] * xhat;
-  l_d_bet = out_grad[idx];
+  float l_d_gam = out_grad[idx] * xhat;
+  float l_d_bet = out_grad[idx];
 
   // Step 2
   // skipping this step because g.shfl_down does not need shared memory!
@@ -274,12 +275,12 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   // 3. Compute reduce sum for dxhat and dxhat*xhat with blockReduce
   // 4. Compute final gradient
 
-  const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + idx_y * width;
   const uint idx_y = blockDim.y * blockIdx.y + threadIdx.y;
-  const float4 mean = means[idx_y];
-  const float4 rvar = rsqrt(vars[idx_y]);
-  const float4 *out_grad_f4 = reinterpret_cast<const float4 *>(out_grad) + idx_y * width;
-  const float4 *inp_grad_f4 = reinterpret_cast<const float4 *>(inp_grad) + idx_y * width;
+  const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + idx_y * hidden_dim;
+  const T mean = means[idx_y];
+  const T rstd = rsqrt(vars[idx_y]);
+  const float4 *out_grad_f4 = reinterpret_cast<const float4 *>(out_grad) + idx_y * hidden_dim;
+  float4 *inp_grad_f4 = reinterpret_cast<const float4 *>(inp_grad) + idx_y * hidden_dim;
 
   const uint idx = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -301,21 +302,23 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
     xhat.z = (inp_j.z - mean) * rstd;
     xhat.w = (inp_j.w - mean) * rstd;
   } else {
-    assert(false && "Error: invalid input! Both vars and means must be provided.")
+    assert(false && "Error: invalid input! Both vars and means must be provided.");
   }
 
   // Step 3
-  float l_sum_dxhat = dxhat.x + dxhat.y + dxhat.z + dxhat.w;
+  float l_sum_dxhat[1];
+  l_sum_dxhat[0] = dxhat.x + dxhat.y + dxhat.z + dxhat.w;
   blockReduce<ReduceType::kSum, 1>(l_sum_dxhat);
-  float l_sum_xhat_dxhat = xhat.x * dxhat.x + xhat.y * dxhat.y + xhat.z * dxhat.z + xhat.w * dxhat.w;
+  float l_sum_xhat_dxhat[1];
+  l_sum_xhat_dxhat[0] = xhat.x * dxhat.x + xhat.y * dxhat.y + xhat.z * dxhat.z + xhat.w * dxhat.w;
   blockReduce<ReduceType::kSum, 1>(l_sum_xhat_dxhat);
 
   // Step 4
-  uint hidden_dim = width << 2;
-  inp_grad_f4.x = dxhat.x * rstd - (l_sum_dxhat + xhat.x * l_sum_xhat_dxhat) * rstd / hidden_dim;
-  inp_grad_f4.y = dxhat.y * rstd - (l_sum_dxhat + xhat.y * l_sum_xhat_dxhat) * rstd / hidden_dim;
-  inp_grad_f4.z = dxhat.z * rstd - (l_sum_dxhat + xhat.z * l_sum_xhat_dxhat) * rstd / hidden_dim;
-  inp_grad_f4.w = dxhat.w * rstd - (l_sum_dxhat + xhat.w * l_sum_xhat_dxhat) * rstd / hidden_dim;
+  uint m = hidden_dim << 2;
+  inp_grad_f4.x = dxhat.x * rstd - (l_sum_dxhat[0] + xhat.x * l_sum_xhat_dxhat[0]) * rstd / m;
+  inp_grad_f4.y = dxhat.y * rstd - (l_sum_dxhat[0] + xhat.y * l_sum_xhat_dxhat[0]) * rstd / m;
+  inp_grad_f4.z = dxhat.z * rstd - (l_sum_dxhat[0] + xhat.z * l_sum_xhat_dxhat[0]) * rstd / m;
+  inp_grad_f4.w = dxhat.w * rstd - (l_sum_dxhat[0] + xhat.w * l_sum_xhat_dxhat[0]) * rstd / m;
   /// END ASSIGN4_2_2
 }
 extern "C" {
