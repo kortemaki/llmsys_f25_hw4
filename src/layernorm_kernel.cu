@@ -205,10 +205,8 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   T xhat;
   if (vars && means) {
     xhat = (inp[idx] - means[blockIdx.x]) * rsqrt(vars[blockIdx.x]);
-  } else if (gamma && betta) {
-    xhat = (output[idx] - betta[blockIdx.x]) / gamma[blockIdx.x];
   } else {
-    assert(false && "Error: invalid input! Either both gamma and betta or vars and means must be provided.");
+    assert(false && "Error: invalid input! Both vars and means must be provided.");
   }
   float l_d_gam = out_grad[idx] * xhat;
   float l_d_bet = out_grad[idx];
@@ -280,7 +278,8 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   const T mean = means[idx_y];
   const T rstd = rsqrt(vars[idx_y]);
   const float4 *out_grad_f4 = reinterpret_cast<const float4 *>(out_grad) + idx_y * hidden_dim;
-  float4 *inp_grad_f4 = reinterpret_cast<const float4 *>(inp_grad) + idx_y * hidden_dim;
+  const float4 *gamma_f4 = reinterpret_cast<const float4 *>(gamma);
+  float4 *inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad) + idx_y * hidden_dim;
 
   const uint idx = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -315,10 +314,13 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
 
   // Step 4
   uint m = hidden_dim << 2;
-  inp_grad_f4.x = dxhat.x * rstd - (l_sum_dxhat[0] + xhat.x * l_sum_xhat_dxhat[0]) * rstd / m;
-  inp_grad_f4.y = dxhat.y * rstd - (l_sum_dxhat[0] + xhat.y * l_sum_xhat_dxhat[0]) * rstd / m;
-  inp_grad_f4.z = dxhat.z * rstd - (l_sum_dxhat[0] + xhat.z * l_sum_xhat_dxhat[0]) * rstd / m;
-  inp_grad_f4.w = dxhat.w * rstd - (l_sum_dxhat[0] + xhat.w * l_sum_xhat_dxhat[0]) * rstd / m;
+  float4 inp_grad_i = make_float4(
+    dxhat.x * rstd - (l_sum_dxhat[0] + xhat.x * l_sum_xhat_dxhat[0]) * rstd / m,
+    dxhat.y * rstd - (l_sum_dxhat[0] + xhat.y * l_sum_xhat_dxhat[0]) * rstd / m,
+    dxhat.z * rstd - (l_sum_dxhat[0] + xhat.z * l_sum_xhat_dxhat[0]) * rstd / m,
+    dxhat.w * rstd - (l_sum_dxhat[0] + xhat.w * l_sum_xhat_dxhat[0]) * rstd / m
+  );
+  inp_grad_f4[idx] = inp_grad_i;
   /// END ASSIGN4_2_2
 }
 extern "C" {
