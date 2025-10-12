@@ -456,7 +456,9 @@ class CudaKernelOps(TensorOps):
           inp._tensor._storage,
           gamma._tensor._storage,
           beta._tensor._storage,
+          batch_size_by_seq_len,
           hidden_dim,
+          stream,
       )
 
       return ln_res, vars, means
