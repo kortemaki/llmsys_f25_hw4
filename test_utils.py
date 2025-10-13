@@ -208,6 +208,7 @@ class TestDecorator(object):
         baseline_res, baseline_time = core(baseline)
         print("Run custom...")
         custom_res, custom_time = core(custom)
+        print(f"Custom print: {baseline_res}")
 
         print("Compare the results of custom and baseline...")
         self.assert_allclose(custom_res, baseline_res, rtol, atol)
