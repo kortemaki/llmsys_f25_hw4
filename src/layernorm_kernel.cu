@@ -59,8 +59,8 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
   // Step 2
   blockReduce<ReduceType::kSum, 1>(l_sum);
   blockReduce<ReduceType::kSum, 1>(l_sum2);
-  const float  mean_x =  l_sum[0] / (blockDim.x << 2);
-  const float mean_x2 = l_sum2[0] / (blockDim.x << 2);
+  const float  mean_x =  l_sum[0] / (hidden_size << 2);
+  const float mean_x2 = l_sum2[0] / (hidden_size << 2);
   const float variance = mean_x2 - mean_x * mean_x + LN_EPSILON;
   const float sigma = sqrtf(variance);
 
