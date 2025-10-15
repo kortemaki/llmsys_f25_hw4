@@ -65,14 +65,14 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
   const float sigma = sqrtf(variance);
 
   // Step 3
-  float4 *ln_res_f4 = reinterpret_cast<float4 *>(ln_res) + blockIdx.x * hidden_size + threadIdx.x;
+  float4 *ln_res_f4 = reinterpret_cast<float4 *>(ln_res) + blockIdx.x * hidden_size;
   const float4 scale_f4 = reinterpret_cast<const float4 *>(scale)[threadIdx.x];
   const float4  bias_f4 = reinterpret_cast<const float4 *>( bias)[threadIdx.x];
   if (threadIdx.x == 0) {
     if (means) means[blockIdx.x] = mean_x;
     vars[blockIdx.x] = variance;
   }
-  *ln_res_f4 = make_float4(
+  ln_res_f4[threadIdx.x] = make_float4(
       scale_f4.x * (inp_f4[threadIdx.x].x - mean_x) / sigma + bias_f4.x,
       scale_f4.y * (inp_f4[threadIdx.x].y - mean_x) / sigma + bias_f4.y,
       scale_f4.z * (inp_f4[threadIdx.x].z - mean_x) / sigma + bias_f4.z,
