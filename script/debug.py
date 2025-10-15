@@ -5,11 +5,11 @@ import pdb
 if __name__ == "__main__":
     backend = minitorch.TensorBackend(minitorch.CudaKernelOps)
 
-    f_out_grad = minitorch.tensor([[1,0,0,0]], backend=backend)
+    f_out_grad = minitorch.tensor([[.1,.2,.3,.4,.5,.6,.7,.8]], backend=backend)
 
-    inp = minitorch.tensor([[1,2,3,4]], backend=backend, requires_grad=True)
-    gamma = minitorch.tensor([10,20,30,40], backend=backend, requires_grad=True)
-    betta = minitorch.tensor([100,200,300,400], backend=backend, requires_grad=True)
+    inp = minitorch.tensor([[1,2,3,4,5,6,7,8]], backend=backend, requires_grad=True)
+    gamma = minitorch.tensor([10,20,30,40,50,60,70,80], backend=backend, requires_grad=True)
+    betta = minitorch.tensor([100,200,300,400,500,600,700,800], backend=backend, requires_grad=True)
     out = inp.layernorm(gamma, betta)
     out.backward(f_out_grad)
     print("input gradients (yours, expected):")
@@ -24,7 +24,7 @@ if __name__ == "__main__":
     f_betta_grad = f_out_grad.sum(dim=0)
     f_gamma_grad = (f_out_grad * xhat).sum(dim=0)
     dinp = dxhat.sum(dim=1) + xhat * (dxhat * xhat).sum(dim=1)
-    dinp = dxhat - dinp / 4
+    dinp = dxhat - dinp / f_out_grad.shape[1]
     dinp = dinp / f_stds
     print(dinp)
 
@@ -36,7 +36,7 @@ if __name__ == "__main__":
     print(betta.grad)
     print(f_betta_grad)
 
-    (_, _, _, vars, means) = out.history.saved_values
+    (_, _, _, vars, means) = out.history.ctx.saved_values
     print("vars (yours, expected):")
     print(vars)
     print(f_vars)

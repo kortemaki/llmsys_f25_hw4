@@ -195,20 +195,20 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   //__shared__ float betta_buffer[TILE_DIM][TILE_DIM];
   //__shared__ float gamma_buffer[TILE_DIM][TILE_DIM];
 
-  cg::thread_block b = cg::this_thread_block();
-  cg::thread_block_tile<TILE_DIM> g = cg::tiled_partition<TILE_DIM>(b);
-
   if (!vars || !means) {
     assert(false && "Error: invalid input! Both vars and means must be provided.");
   }
 
-  // Step 1
   const uint idx_x = blockDim.x * blockIdx.x + threadIdx.x;
   const uint idx_y = blockDim.y * blockIdx.y + threadIdx.y;
   const uint idx = idx_y * width + idx_x;
   uint size = rows * width;
-  if (idx > size) return;
+  if (idx >= size) return;
 
+  cg::thread_block b = cg::this_thread_block();
+  cg::thread_block_tile<TILE_DIM> g = cg::tiled_partition<TILE_DIM>(b);
+
+  // Step 1
   uint stride = blockDim.y * width;
   T xhat;
   T scale = rsqrt(vars[blockIdx.x] + LN_EPSILON);
