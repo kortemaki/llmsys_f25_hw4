@@ -59,8 +59,8 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
   // Step 2
   blockReduce<ReduceType::kSum, 1>(l_sum);
   blockReduce<ReduceType::kSum, 1>(l_sum2);
-  const float  mean_x =  l_sum[0] / blockDim.x;
-  const float mean_x2 = l_sum2[0] / blockDim.x;
+  const float  mean_x =  l_sum[0] / (blockDim.x << 2);
+  const float mean_x2 = l_sum2[0] / (blockDim.x << 2);
   const float variance = mean_x2 - mean_x * mean_x + LN_EPSILON;
   const float sigma = sqrtf(variance);
 
@@ -211,10 +211,11 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
 
   uint stride = blockDim.y * width;
   T xhat;
-  float l_d_gam = 0;
-  float l_d_bet = 0;
+  T scale = rsqrt(vars[blockIdx.x] + LN_EPSILON);
+  T l_d_gam = 0;
+  T l_d_bet = 0;
   for (uint i = idx; i < size; i += stride) {
-    xhat = (inp[idx] - means[blockIdx.x]) * rsqrt(vars[blockIdx.x] + LN_EPSILON);
+    xhat = (inp[idx] - means[blockIdx.x]) * scale;
     l_d_gam += out_grad[i] * xhat;
     l_d_bet += out_grad[i];
   }
