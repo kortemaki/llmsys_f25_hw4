@@ -192,24 +192,32 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   //      -> Now g.shfl_down helps you do so without consuming any shared memory. g.shfl_down makes it more efficient.
   // 4. Assign the final result to the correct position in the global output
 
-  __shared__ float betta_buffer[TILE_DIM][TILE_DIM];
-  __shared__ float gamma_buffer[TILE_DIM][TILE_DIM];
+  //__shared__ float betta_buffer[TILE_DIM][TILE_DIM];
+  //__shared__ float gamma_buffer[TILE_DIM][TILE_DIM];
 
   cg::thread_block b = cg::this_thread_block();
   cg::thread_block_tile<TILE_DIM> g = cg::tiled_partition<TILE_DIM>(b);
+
+  if (!vars || !means) {
+    assert(false && "Error: invalid input! Both vars and means must be provided.");
+  }
 
   // Step 1
   const uint idx_x = blockDim.x * blockIdx.x + threadIdx.x;
   const uint idx_y = blockDim.y * blockIdx.y + threadIdx.y;
   const uint idx = idx_y * width + idx_x;
+  uint size = rows * width;
+  if (idx > size) return;
+
+  uint stride = blockDim.y * width;
   T xhat;
-  if (vars && means) {
+  float l_d_gam = 0;
+  float l_d_bet = 0;
+  for (uint i = idx; i < size; i += stride) {
     xhat = (inp[idx] - means[blockIdx.x]) * rsqrt(vars[blockIdx.x]);
-  } else {
-    assert(false && "Error: invalid input! Both vars and means must be provided.");
+    l_d_gam += out_grad[i] * xhat;
+    l_d_bet += out_grad[i];
   }
-  float l_d_gam = out_grad[idx] * xhat;
-  float l_d_bet = out_grad[idx];
 
   // Step 2
   // skipping this step because g.shfl_down does not need shared memory!
@@ -219,14 +227,12 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
     l_d_gam += g.shfl_down(l_d_gam, i);
     l_d_bet += g.shfl_down(l_d_bet, i);
   }
-  if (threadIdx.x == 0) {
-    gamma_buffer[blockIdx.x][blockIdx.y] = l_d_gam;
-    betta_buffer[blockIdx.x][blockIdx.y] = l_d_bet;
-  }
 
   // Step 4
-  gamma_grad[idx] = gamma_buffer[blockIdx.x][blockIdx.y];
-  betta_grad[idx] = betta_buffer[blockIdx.x][blockIdx.y];
+  if (threadIdx.x == 0) {
+    gamma_grad[idx_y] = l_d_gam;
+    betta_grad[idx_y] = l_d_bet;
+  }
   /// END ASSIGN4_2_2
 }
 
