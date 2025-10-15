@@ -214,7 +214,7 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   float l_d_gam = 0;
   float l_d_bet = 0;
   for (uint i = idx; i < size; i += stride) {
-    xhat = (inp[idx] - means[blockIdx.x]) * rsqrt(vars[blockIdx.x]);
+    xhat = (inp[idx] - means[blockIdx.x]) * rsqrt(vars[blockIdx.x] + LN_EPSILON);
     l_d_gam += out_grad[i] * xhat;
     l_d_bet += out_grad[i];
   }
@@ -279,10 +279,14 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   // 3. Compute reduce sum for dxhat and dxhat*xhat with blockReduce
   // 4. Compute final gradient
 
+  if (!vars || !means) {
+    assert(false && "Error: invalid input! Both vars and means must be provided.");
+  }
+
   const uint idx_y = blockDim.y * blockIdx.y + threadIdx.y;
   const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + idx_y * hidden_dim;
   const T mean = means[idx_y];
-  const T rstd = rsqrt(vars[idx_y]);
+  const T rstd = rsqrt(vars[idx_y] + LN_EPSILON);
   const float4 *out_grad_f4 = reinterpret_cast<const float4 *>(out_grad) + idx_y * hidden_dim;
   const float4 *gamma_f4 = reinterpret_cast<const float4 *>(gamma);
   float4 *inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad) + idx_y * hidden_dim;
@@ -300,15 +304,11 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
 
   // Step 2
   float4 xhat;
-  if (vars && means) {
-    const float4 inp_j = inp_f4[idx];
-    xhat.x = (inp_j.x - mean) * rstd;
-    xhat.y = (inp_j.y - mean) * rstd;
-    xhat.z = (inp_j.z - mean) * rstd;
-    xhat.w = (inp_j.w - mean) * rstd;
-  } else {
-    assert(false && "Error: invalid input! Both vars and means must be provided.");
-  }
+  const float4 inp_j = inp_f4[idx];
+  xhat.x = (inp_j.x - mean) * rstd;
+  xhat.y = (inp_j.y - mean) * rstd;
+  xhat.z = (inp_j.z - mean) * rstd;
+  xhat.w = (inp_j.w - mean) * rstd;
 
   // Step 3
   float l_sum_dxhat[1];
