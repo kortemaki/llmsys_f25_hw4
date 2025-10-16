@@ -208,13 +208,14 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   cg::thread_block_tile<TILE_DIM> g = cg::tiled_partition<TILE_DIM>(b);
 
   // Step 1
-  uint stride = blockDim.y * width;
   T xhat;
   T scale = rsqrt(vars[idx_y] + LN_EPSILON);
   T l_d_gam = 0;
   T l_d_bet = 0;
-  for (uint i = idx; i < size; i += stride) {
-    xhat = (inp[idx] - means[idx_y]) * scale;
+  for (uint i_y = idx_y; i_y < rows; i += blockDim.y) {
+    uint i = i_y * width + idx_x;
+    if (i >= size) continue;
+    xhat = (inp[i] - means[i_y]) * scale;
     l_d_gam += out_grad[i] * xhat;
     l_d_bet += out_grad[i];
   }
