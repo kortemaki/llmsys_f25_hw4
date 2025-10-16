@@ -192,8 +192,8 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   //      -> Now g.shfl_down helps you do so without consuming any shared memory. g.shfl_down makes it more efficient.
   // 4. Assign the final result to the correct position in the global output
 
-  //__shared__ float betta_buffer[TILE_DIM][TILE_DIM];
-  //__shared__ float gamma_buffer[TILE_DIM][TILE_DIM];
+  __shared__ float betta_buffer[TILE_DIM][TILE_DIM];
+  __shared__ float gamma_buffer[TILE_DIM][TILE_DIM];
 
   if (!vars || !means) {
     assert(false && "Error: invalid input! Both vars and means must be provided.");
@@ -221,19 +221,27 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   }
 
   // Step 2
-  // skipping this step because g.shfl_down does not need shared memory!
+  betta_buffer[idx_x][idx_y] = l_d_bet;
+  gamma_buffer[idx_x][idx_y] = l_d_gam;
+  __syncthreads();
 
   // Step 3
+  l_d_bet = betta_buffer[idx_y][idx_x];
+  l_d_gam = gamma_buffer[idx_y][idx_x];
   for (int i = g.size() / 2; i > 0; i /= 2) {
     l_d_gam += g.shfl_down(l_d_gam, i);
     l_d_bet += g.shfl_down(l_d_bet, i);
   }
 
   // Step 4
-  if (threadIdx.x == 0) {
-    gamma_grad[idx_y] = l_d_gam;
-    betta_grad[idx_y] = l_d_bet;
-  }
+  if (idx_y) return;
+
+  betta_buffer[0][idx_x] = l_d_bet;
+  gamma_buffer[0][idx_x] = l_d_gam;
+  __syncthreads();
+
+  gamma_grad[idx_x] = gamma_buffer[0][idx_x];
+  betta_grad[idx_x] = betta_buffer[0][idx_x];
   /// END ASSIGN4_2_2
 }
 
