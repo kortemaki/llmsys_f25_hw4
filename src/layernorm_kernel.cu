@@ -203,7 +203,6 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   const uint idx_y = blockDim.y * blockIdx.y + threadIdx.y;
   const uint idx = idx_y * width + idx_x;
   uint size = rows * width;
-  if (idx >= size) return;
 
   cg::thread_block b = cg::this_thread_block();
   cg::thread_block_tile<TILE_DIM> g = cg::tiled_partition<TILE_DIM>(b);
@@ -211,37 +210,37 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   // Step 1
   uint stride = blockDim.y * width;
   T xhat;
-  T scale = rsqrt(vars[blockIdx.x] + LN_EPSILON);
+  T scale = rsqrt(vars[idx_y] + LN_EPSILON);
   T l_d_gam = 0;
   T l_d_bet = 0;
   for (uint i = idx; i < size; i += stride) {
-    xhat = (inp[idx] - means[blockIdx.x]) * scale;
+    xhat = (inp[idx] - means[idx_y]) * scale;
     l_d_gam += out_grad[i] * xhat;
     l_d_bet += out_grad[i];
   }
 
   // Step 2
-  betta_buffer[idx_x][idx_y] = l_d_bet;
-  gamma_buffer[idx_x][idx_y] = l_d_gam;
+  betta_buffer[threadIdx.x][threadIdx.y] = l_d_bet;
+  gamma_buffer[threadIdx.x][threadIdx.y] = l_d_gam;
   __syncthreads();
 
   // Step 3
-  l_d_bet = betta_buffer[idx_y][idx_x];
-  l_d_gam = gamma_buffer[idx_y][idx_x];
+  l_d_bet = betta_buffer[threadIdx.y][threadIdx.x];
+  l_d_gam = gamma_buffer[threadIdx.y][threadIdx.x];
   for (int i = g.size() / 2; i > 0; i /= 2) {
     l_d_gam += g.shfl_down(l_d_gam, i);
     l_d_bet += g.shfl_down(l_d_bet, i);
   }
+  if (!idx_x) {
+    betta_buffer[threadIdx.y][threadIdx.x] = l_d_bet;
+    gamma_buffer[threadIdx.y][threadIdx.x] = l_d_gam;
+  }
 
   // Step 4
   if (idx_y) return;
-
-  betta_buffer[0][idx_x] = l_d_bet;
-  gamma_buffer[0][idx_x] = l_d_gam;
-  __syncthreads();
-
-  gamma_grad[idx_x] = gamma_buffer[0][idx_x];
-  betta_grad[idx_x] = betta_buffer[0][idx_x];
+  if (idx_x >= width) return;
+  gamma_grad[idx_x] = gamma_buffer[threadIdx.x][threadIdx.y];
+  betta_grad[idx_x] = betta_buffer[threadIdx.x][threadIdx.y];
   /// END ASSIGN4_2_2
 }
 
