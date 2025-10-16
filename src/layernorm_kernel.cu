@@ -212,7 +212,7 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   T scale = rsqrt(vars[idx_y] + LN_EPSILON);
   T l_d_gam = 0;
   T l_d_bet = 0;
-  for (uint i_y = idx_y; i_y < rows; i += blockDim.y) {
+  for (uint i_y = idx_y; i_y < rows; i_y += blockDim.y) {
     uint i = i_y * width + idx_x;
     if (i >= size) continue;
     xhat = (inp[i] - means[i_y]) * scale;
@@ -236,6 +236,7 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
     betta_buffer[threadIdx.y][threadIdx.x] = l_d_bet;
     gamma_buffer[threadIdx.y][threadIdx.x] = l_d_gam;
   }
+  __syncthreads();
 
   // Step 4
   if (idx_y) return;
