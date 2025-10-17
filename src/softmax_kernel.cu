@@ -347,7 +347,7 @@ void launch_attn_softmax_bw(float *out_grad,
   // BEGIN ASSIGN4_1_2
 
   int float_size = sizeof(float);
-  int grad_size = softmax_len * float_size;
+  int grad_size = softmax_len * rows * float_size;
   int inp_size = softmax_len * rows * float_size;
 
   float *d_grad, *d_inp;
