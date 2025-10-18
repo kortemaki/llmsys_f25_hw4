@@ -10,6 +10,7 @@
 
 namespace cg = cooperative_groups;
 const float EPSILON = 1e-8f;
+const uint WARPS_PER_BLOCK = 4;
 
 namespace lightseq {
 namespace cuda {
@@ -301,6 +302,8 @@ output: [batch_size, nhead, seq_len, seq_len], output of softmax forward.
 */
 template <typename T, int ITERATIONS>
 __global__ void ker_attn_softmax_bw(T *grad, const T *inp, int softmax_length) {
+  __shared__ float row_sum[WARPS_PER_BLOCK];
+
   int batch_idx = blockIdx.x * blockDim.y + threadIdx.y;
   int offset = batch_idx * softmax_length + threadIdx.x;
 
@@ -320,17 +323,22 @@ __global__ void ker_attn_softmax_bw(T *grad, const T *inp, int softmax_length) {
       sum += (float)grad_reg[i] * (float)inp_reg[i];
     }
   }
+  printf("blockIdx %d %d threadIdx %d %d offset %d sum %f\n", blockIdx.x, blockIdx.y, threadIdx.x, threadIdx.y, offset, sum);
 
   cg::thread_block b = cg::this_thread_block();
   cg::thread_block_tile<WARP_SIZE> g = cg::tiled_partition<WARP_SIZE>(b);
 
   for (int i = 1; i < WARP_SIZE; i <<= 1) sum += g.shfl_xor(sum, i);
+  if (threadIdx.x == 0) {
+    printf("sum for row %d %f\n", batch_idx, sum);
+    row_sum[threadIdx.y] = sum;
+  }
 
   #pragma unroll
   for (int i = 0; i < ITERATIONS; ++i) {
     int curr_idx = threadIdx.x + i * WARP_SIZE;
     if (curr_idx < softmax_length)
-      grad[i * WARP_SIZE] = (T)((float)inp_reg[i] * ((float)grad_reg[i] - sum));
+      grad[i * WARP_SIZE] = (T)((float)inp_reg[i] * ((float)grad_reg[i] - row_sum[threadIdx.y]));
   }
 }
 
@@ -341,7 +349,7 @@ void launch_attn_softmax_bw(float *out_grad,
                                 int softmax_len,
                                 cudaStream_t stream) {
 
-  const int warps_per_block = 4;
+  const int warps_per_block = WARPS_PER_BLOCK;
   dim3 grid_dim((rows + warps_per_block - 1) / warps_per_block);
   dim3 block_dim(WARP_SIZE, warps_per_block);
   // BEGIN ASSIGN4_1_2
