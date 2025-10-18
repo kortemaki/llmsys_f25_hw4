@@ -65,19 +65,24 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
   const float sigma = sqrtf(variance);
 
   // Step 3
-  float4 *ln_res_f4 = reinterpret_cast<float4 *>(ln_res) + blockIdx.x * hidden_size;
-  const float4 scale_f4 = reinterpret_cast<const float4 *>(scale)[threadIdx.x];
-  const float4  bias_f4 = reinterpret_cast<const float4 *>( bias)[threadIdx.x];
   if (threadIdx.x == 0) {
     if (means) means[blockIdx.x] = mean_x;
     vars[blockIdx.x] = variance;
   }
-  ln_res_f4[threadIdx.x] = make_float4(
-      scale_f4.x * (inp_f4[threadIdx.x].x - mean_x) / sigma + bias_f4.x,
-      scale_f4.y * (inp_f4[threadIdx.x].y - mean_x) / sigma + bias_f4.y,
-      scale_f4.z * (inp_f4[threadIdx.x].z - mean_x) / sigma + bias_f4.z,
-      scale_f4.w * (inp_f4[threadIdx.x].w - mean_x) / sigma + bias_f4.w
-  );
+  float4 *ln_res_f4 = reinterpret_cast<float4 *>(ln_res) + blockIdx.x * hidden_size;
+  const float4 *scale_f4 = reinterpret_cast<const float4 *>(scale);
+  const float4  *bias_f4 = reinterpret_cast<const float4 *>( bias);
+  for (uint idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
+    const float4 val = inp_f4[idx];
+    const float4 scale_i = scale_f4[idx];
+    const float4 bias_i = bias_f4[idx];
+    ln_res_f4[idx] = make_float4(
+      scale_i.x * (val.x - mean_x) / sigma + bias_i.x,
+      scale_i.y * (val.y - mean_x) / sigma + bias_i.y,
+      scale_i.z * (val.z - mean_x) / sigma + bias_i.z,
+      scale_i.w * (val.w - mean_x) / sigma + bias_i.w
+    );
+  }
   /// END ASSIGN4_2_1
 }
 
