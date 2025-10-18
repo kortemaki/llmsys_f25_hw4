@@ -323,15 +323,15 @@ __global__ void ker_attn_softmax_bw(T *grad, const T *inp, int softmax_length) {
       sum += (float)grad_reg[i] * (float)inp_reg[i];
     }
   }
-  printf("blockIdx %d %d threadIdx %d %d offset %d sum %f\n", blockIdx.x, blockIdx.y, threadIdx.x, threadIdx.y, offset, sum);
+  //printf("blockIdx %d %d threadIdx %d %d offset %d sum %f\n", blockIdx.x, blockIdx.y, threadIdx.x, threadIdx.y, offset, sum);
 
   cg::thread_block b = cg::this_thread_block();
   cg::thread_block_tile<WARP_SIZE> g = cg::tiled_partition<WARP_SIZE>(b);
 
   for (int i = 1; i < WARP_SIZE; i <<= 1) sum += g.shfl_xor(sum, i);
   if (threadIdx.x == 0) {
-    printf("softmax_len %d", softmax_length);
-    printf("sum for row %d %f\n", batch_idx, sum);
+    //printf("softmax_len %d", softmax_length);
+    //printf("sum for row %d %f\n", batch_idx, sum);
     row_sum[threadIdx.y] = sum;
   }
   __syncthreads();
@@ -341,7 +341,7 @@ __global__ void ker_attn_softmax_bw(T *grad, const T *inp, int softmax_length) {
     int curr_idx = threadIdx.x + i * WARP_SIZE;
     if (curr_idx < softmax_length) {
       grad[i * WARP_SIZE] = (T)((float)inp_reg[i] * ((float)grad_reg[i] - row_sum[threadIdx.y]));
-      printf("grad for position %d %d %f\n", batch_idx, curr_idx, grad[i * WARP_SIZE]);
+      //printf("grad for position %d %d %f\n", batch_idx, curr_idx, grad[i * WARP_SIZE]);
     }
   }
 }
