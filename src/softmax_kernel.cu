@@ -339,6 +339,7 @@ __global__ void ker_attn_softmax_bw(T *grad, const T *inp, int softmax_length) {
     int curr_idx = threadIdx.x + i * WARP_SIZE;
     if (curr_idx < softmax_length)
       grad[i * WARP_SIZE] = (T)((float)inp_reg[i] * ((float)grad_reg[i] - row_sum[threadIdx.y]));
+      printf("grad for position %d %d %f\n", batch_idx, curr_idx, grad[i * WARP_SIZE]);
   }
 }
 
