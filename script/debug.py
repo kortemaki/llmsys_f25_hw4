@@ -5,14 +5,14 @@ import pdb
 backend = minitorch.TensorBackend(minitorch.CudaKernelOps)
 
 def debug_layernorm_fw():
-    inp = minitorch.tensor([[1,2,3,4,5,6,7,8]], backend=backend, requires_grad=True)
+    inp = minitorch.tensor([[1,2,3,4,5,6,7,8],[-1,-2,-3,-4,-5,-6,-7,-8]], backend=backend, requires_grad=True)
     gamma = minitorch.tensor([10,20,30,40,50,60,70,80], backend=backend, requires_grad=True)
     betta = minitorch.tensor([100,200,300,400,500,600,700,800], backend=backend, requires_grad=True)
     out = inp.layernorm(gamma, betta)
     print("layernorm output (yours, expected):")
     print(out)
 
-    inp = minitorch.tensor([[1,2,3,4,5,6,7,8]], backend=backend, requires_grad=True)
+    inp = minitorch.tensor([[1,2,3,4,5,6,7,8],[-1,-2,-3,-4,-5,-6,-7,-8]], backend=backend, requires_grad=True)
     x = inp.contiguous()
     batch, dim = x.shape
     mean = x.mean(dim=1).view(batch, 1)
