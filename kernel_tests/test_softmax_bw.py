@@ -25,7 +25,7 @@ def test_launch_attn_softmax_bw():
   out_grad = kt.rand((batch_size, nhead, from_len, to_len))
   inp = kt.rand((batch_size, nhead, from_len, to_len))
 
-  def custom():
+  def custom_original():
     out_grad_mt = minitorch.tensor(out_grad.clone().tolist(), backend=backend, requires_grad=True)
     inp_mt = minitorch.tensor(inp.clone().tolist(), backend=backend, requires_grad=True)
     mask_mt = minitorch.tensor(np.zeros((batch_size, 1, 1, to_len)).tolist(), backend=backend, requires_grad=True)
@@ -33,6 +33,21 @@ def test_launch_attn_softmax_bw():
 
     start_time = time.time()
     soft_inp_mt.backward(out_grad_mt)
+    end_time = time.time()
+
+    inp_grad = torch.tensor(inp_mt.grad.to_numpy(), dtype=torch.float32).cuda()
+    return [
+        inp_grad,
+    ], end_time - start_time
+
+  def custom():
+    out_grad_mt = minitorch.tensor(out_grad.clone().tolist(), backend=backend, requires_grad=True)
+    inp_mt = minitorch.tensor(inp.clone().tolist(), backend=backend, requires_grad=True)
+    mask_mt = minitorch.tensor(np.zeros((batch_size, 1, 1, to_len)).tolist(), backend=backend, requires_grad=True)
+    soft_inp_mt = inp_mt.attn_softmax(mask_mt)
+
+    start_time = time.time()
+    inp_mt.grad, _ = minitorch.Attn_Softmax.backward(soft_inp_mt.history.ctx, out_grad_mt)
     end_time = time.time()
 
     inp_grad = torch.tensor(inp_mt.grad.to_numpy(), dtype=torch.float32).cuda()
