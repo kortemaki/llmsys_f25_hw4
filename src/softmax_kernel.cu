@@ -330,9 +330,11 @@ __global__ void ker_attn_softmax_bw(T *grad, const T *inp, int softmax_length) {
 
   for (int i = 1; i < WARP_SIZE; i <<= 1) sum += g.shfl_xor(sum, i);
   if (threadIdx.x == 0) {
+    printf("softmax_len %d", softmax_length);
     printf("sum for row %d %f\n", batch_idx, sum);
     row_sum[threadIdx.y] = sum;
   }
+  __syncthreads();
 
   #pragma unroll
   for (int i = 0; i < ITERATIONS; ++i) {
