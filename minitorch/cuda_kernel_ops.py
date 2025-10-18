@@ -421,8 +421,8 @@ class CudaKernelOps(TensorOps):
       lib_softmax.launch_attn_softmax_bw(
         out_grad._tensor._storage,
         soft_inp._tensor._storage,
-        batch_size * nhead * to_len,
-        from_len,
+        batch_size * nhead * from_len,
+        to_len,
         stream,
       )
 

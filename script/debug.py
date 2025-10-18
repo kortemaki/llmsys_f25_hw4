@@ -2,9 +2,9 @@ import minitorch
 import numpy as np
 import pdb
 
-if __name__ == "__main__":
-    backend = minitorch.TensorBackend(minitorch.CudaKernelOps)
+backend = minitorch.TensorBackend(minitorch.CudaKernelOps)
 
+def debug_layernorm_bw():
     f_out_grad = minitorch.tensor([[.1,.2,.3,.4,.5,.6,.7,.8]], backend=backend)
 
     inp = minitorch.tensor([[1,2,3,4,5,6,7,8]], backend=backend, requires_grad=True)
@@ -46,3 +46,20 @@ if __name__ == "__main__":
     print(f_means)
 
     pdb.set_trace()
+
+def debug_softmax_bw():
+    inp = minitorch.tensor([[[[1],[2],[3],[4]]]], backend=backend, requires_grad=True)
+    mask = minitorch.tensor(np.zeros((1,1,1,1)).tolist(), backend=backend, requires_grad=True)
+    out_grad = minitorch.tensor([[[[.1],[.2],[.3],[.4]]]], backend=backend, requires_grad=True)
+    soft_inp = inp.attn_softmax(mask)
+    soft_inp.backward(out_grad)
+    print("input gradients (yours, expected):")
+    print(inp.grad)
+
+    tsum = out_grad * soft_inp
+    tsum = tsum.sum(dim=3).view(tsum.shape[0], tsum.shape[1], tsum.shape[2], 1)
+    res = soft_inp * (out_grad - tsum)
+    print(res)
+
+if __name__ == '__main__':
+    debug_softmax_bw()
