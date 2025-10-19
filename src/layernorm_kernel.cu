@@ -341,12 +341,12 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
     sums[1] = l_sums[1];
   }
   __syncthreads();
-  // divide both by m here to save repeated divides below
-  float sum_dxhat_m = sums[0] / m;
-  float sum_xhat_dxhat_m = sums[1] / m;
 
   // Step 4
+  // divide both sums by m here to save repeated divides below
   uint m = hidden_dim << 2;
+  float sum_dxhat_m = sums[0] / m;
+  float sum_xhat_dxhat_m = sums[1] / m;
   for (uint i = idx; i < hidden_dim; i += blockDim.x) {
     float4 inp_grad_i = make_float4(
       (dxhat.x - sum_dxhat_m + xhat.x * sum_xhat_dxhat_m) * rstd,
@@ -354,7 +354,7 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
       (dxhat.z - sum_dxhat_m + xhat.z * sum_xhat_dxhat_m) * rstd,
       (dxhat.w - sum_dxhat_m + xhat.w * sum_xhat_dxhat_m) * rstd
     );
-    inp_grad_f4[idx] = inp_grad_i;
+    inp_grad_f4[i] = inp_grad_i;
   }
   /// END ASSIGN4_2_2
 }
