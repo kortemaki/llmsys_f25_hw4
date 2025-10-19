@@ -12,21 +12,6 @@ namespace cuda {
 const float LN_EPSILON = 1e-8f;
 #define TILE_DIM 32
 
-/* reciprocals of integer multiples of 4 through 4096 */
-__constant__ std::map<int, float> reciprocals = {
-  {1024, 0.000244140625f},
-  { 512,  0.00048828125f},
-  { 256,   0.0009765625f},
-  { 128,    0.001953125f},
-  {  64,     0.00390625f},
-  {  32,      0.0078125f},
-  {  16,       0.015625f},
-  {   8,        0.03125f},
-  {   4,         0.0625f},
-  {   2,          0.125f},
-  {   1,           0.25f},
-};
-
 /**
 @brief: ker_layer_norm
 Standard layer normalization.
@@ -354,10 +339,10 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   //printf("thread %d %d xhat [%f, %f, %f, %f] dxhat [%f, %f, %f, %f]\n", blockIdx.x, threadIdx.x, xhat.x, xhat.y, xhat.z, xhat.w, dxhat.x, dxhat.y, dxhat.z, dxhat.w);
 
   // Step 4
-  // because m is small, use a lookup table to avoid a divide
-  const float one_over_m = reciprocals[hidden_dim];
-  float sum_dxhat_m = sums[0] * one_over_m;
-  float sum_xhat_dxhat_m = sums[1] * one_over_m;
+  // perform only one divide here to avoid repeated divides below
+  float rm = 1.f / (float) (hidden_dim << 2);
+  float sum_dxhat_m = sums[0] * rm;
+  float sum_xhat_dxhat_m = sums[1] * rm;
   inp_grad_f4[idx] = make_float4(
     (dxhat.x - sum_dxhat_m - xhat.x * sum_xhat_dxhat_m) * rstd,
     (dxhat.y - sum_dxhat_m - xhat.y * sum_xhat_dxhat_m) * rstd,
