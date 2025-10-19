@@ -309,45 +309,53 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   float4 *inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad) + idx_y * hidden_dim;
 
   const uint idx = threadIdx.x;
-
-  // Step 1
   float4 dxhat;
-  const float4 y_j = out_grad_f4[idx];
-  const float4 gamma_j = gamma_f4[idx];
-  dxhat.x = y_j.x * gamma_j.x;
-  dxhat.y = y_j.y * gamma_j.y;
-  dxhat.z = y_j.z * gamma_j.z;
-  dxhat.w = y_j.w * gamma_j.w;
-
-  // Step 2
   float4 xhat;
-  const float4 inp_j = inp_f4[idx];
-  xhat.x = (inp_j.x - mean) * rstd;
-  xhat.y = (inp_j.y - mean) * rstd;
-  xhat.z = (inp_j.z - mean) * rstd;
-  xhat.w = (inp_j.w - mean) * rstd;
-
-  // Step 3
   float l_sums[2];
-  l_sums[0] = dxhat.x + dxhat.y + dxhat.z + dxhat.w;
-  l_sums[1] = xhat.x * dxhat.x + xhat.y * dxhat.y + xhat.z * dxhat.z + xhat.w * dxhat.w;
-  blockReduce<ReduceType::kSum, 2>(l_sums);
   __shared__ float sums[2];
+
+  for (uint i = idx; i < hidden_dim; i += blockDim.x) {
+    // Step 1
+    const float4 y_j = out_grad_f4[i];
+    const float4 gamma_j = gamma_f4[i];
+    dxhat.x = y_j.x * gamma_j.x;
+    dxhat.y = y_j.y * gamma_j.y;
+    dxhat.z = y_j.z * gamma_j.z;
+    dxhat.w = y_j.w * gamma_j.w;
+
+    // Step 2
+    const float4 inp_j = inp_f4[i];
+    xhat.x = (inp_j.x - mean) * rstd;
+    xhat.y = (inp_j.y - mean) * rstd;
+    xhat.z = (inp_j.z - mean) * rstd;
+    xhat.w = (inp_j.w - mean) * rstd;
+
+    // Step 3
+    l_sums[0] = dxhat.x + dxhat.y + dxhat.z + dxhat.w;
+    l_sums[1] = xhat.x * dxhat.x + xhat.y * dxhat.y + xhat.z * dxhat.z + xhat.w * dxhat.w;
+  }
+
+  blockReduce<ReduceType::kSum, 2>(l_sums);
   if (!threadIdx.x) {
     sums[0] = l_sums[0];
     sums[1] = l_sums[1];
   }
   __syncthreads();
+  // divide both by m here to save repeated divides below
+  float sum_dxhat_m = sums[0] / m;
+  float sum_xhat_dxhat_m = sums[1] / m;
 
   // Step 4
   uint m = hidden_dim << 2;
-  float4 inp_grad_i = make_float4(
-    (dxhat.x - (sums[0] + xhat.x * sums[1]) / m) * rstd,
-    (dxhat.y - (sums[0] + xhat.y * sums[1]) / m) * rstd,
-    (dxhat.z - (sums[0] + xhat.z * sums[1]) / m) * rstd,
-    (dxhat.w - (sums[0] + xhat.w * sums[1]) / m) * rstd
-  );
-  inp_grad_f4[idx] = inp_grad_i;
+  for (uint i = idx; i < hidden_dim; i += blockDim.x) {
+    float4 inp_grad_i = make_float4(
+      (dxhat.x - sum_dxhat_m + xhat.x * sum_xhat_dxhat_m) * rstd,
+      (dxhat.y - sum_dxhat_m + xhat.y * sum_xhat_dxhat_m) * rstd,
+      (dxhat.z - sum_dxhat_m + xhat.z * sum_xhat_dxhat_m) * rstd,
+      (dxhat.w - sum_dxhat_m + xhat.w * sum_xhat_dxhat_m) * rstd
+    );
+    inp_grad_f4[idx] = inp_grad_i;
+  }
   /// END ASSIGN4_2_2
 }
 extern "C" {
