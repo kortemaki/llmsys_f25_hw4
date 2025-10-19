@@ -332,7 +332,7 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   l_sums[0] = dxhat.x + dxhat.y + dxhat.z + dxhat.w;
   l_sums[1] = xhat.x * dxhat.x + xhat.y * dxhat.y + xhat.z * dxhat.z + xhat.w * dxhat.w;
   blockReduce<ReduceType::kSum, 2>(l_sums);
-  static __shared__ float sums[2];
+  __shared__ float sums[2];
   if (!(threadIdx.x || threadIdx.y)) {
     sums[0] = l_sums[0];
     sums[1] = l_sums[1];
