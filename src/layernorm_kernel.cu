@@ -209,6 +209,8 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   const uint idx_x = blockDim.x * blockIdx.x + threadIdx.x;
   const uint idx_y = threadIdx.y;
   uint size = rows * width;
+  inp += idx_y * width;
+  out_grad += idx_y * width;
 
   cg::thread_block b = cg::this_thread_block();
   cg::thread_block_tile<TILE_DIM> g = cg::tiled_partition<TILE_DIM>(b);
