@@ -387,7 +387,7 @@ __global__ void ker_ln_bw_dinp_lt65536(T *inp_grad, const T *out_grad, const T *
       y_j.y * gamma_j.y,
       y_j.z * gamma_j.z,
       y_j.w * gamma_j.w
-    )
+    );
 
     // Step 2
     const float4 inp_j = inp_f4[i];
@@ -396,7 +396,7 @@ __global__ void ker_ln_bw_dinp_lt65536(T *inp_grad, const T *out_grad, const T *
       (inp_j.y - mean) * rstd,
       (inp_j.z - mean) * rstd,
       (inp_j.w - mean) * rstd
-    )
+    );
 
     // Step 3
     l_sums[0] = dxhat[k].x + dxhat[k].y + dxhat[k].z + dxhat[k].w;
@@ -425,7 +425,7 @@ __global__ void ker_ln_bw_dinp_lt65536(T *inp_grad, const T *out_grad, const T *
       (dxhat[k].w - sum_dxhat_m + xhat[k].w * sum_xhat_dxhat_m) * rstd
     );
     inp_grad_f4[i] = inp_grad_i;
-    k += 1
+    k += 1;
   }
   /// END ASSIGN4_2_2
 }
@@ -436,8 +436,8 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   // Here we will allocate dynamic memory for xhat and dxhat on the heap
   // This should be large enough that we will have other problems if we run out
   const uint ITERATIONS = hidden_dim / MAX_THREADS;
-  float4 *xhat = (float*) malloc(ITERATIONS * sizeof(float4));
-  float4 *dxhat = (float*) malloc(ITERATIONS * sizeof(float4));
+  float4 *xhat = (float4*) malloc(ITERATIONS * sizeof(float4));
+  float4 *dxhat = (float4*) malloc(ITERATIONS * sizeof(float4));
 
   if (!vars || !means) {
     assert(false && "Error: invalid input! Both vars and means must be provided.");
@@ -464,7 +464,7 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
       y_j.y * gamma_j.y,
       y_j.z * gamma_j.z,
       y_j.w * gamma_j.w
-    )
+    );
 
     // Step 2
     const float4 inp_j = inp_f4[i];
@@ -473,7 +473,7 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
       (inp_j.y - mean) * rstd,
       (inp_j.z - mean) * rstd,
       (inp_j.w - mean) * rstd
-    )
+    );
 
     // Step 3
     l_sums[0] = dxhat[k].x + dxhat[k].y + dxhat[k].z + dxhat[k].w;
@@ -502,7 +502,7 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
       (dxhat[k].w - sum_dxhat_m + xhat[k].w * sum_xhat_dxhat_m) * rstd
     );
     inp_grad_f4[i] = inp_grad_i;
-    k += 1
+    k += 1;
   }
   free(xhat);
   free(dxhat);
@@ -560,11 +560,9 @@ void launch_layernorm_bw(float *gamma_grad, float *betta_grad, float *inp_grad,
   } else if (hidden_dim <= 65536) {
     ker_ln_bw_dinp_lt65536<float><<<batch_size, nthread, 0, stream_2>>>(
       d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
-    )
   } else {
     ker_ln_bw_dinp<float><<<batch_size, nthread, 0, stream_2>>>(
       d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
-    )
   }
 
   // Synchronize and check for errors
