@@ -352,12 +352,13 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   );
   /// END ASSIGN4_2_2
 }
+// WARNING: because of the way the loops below have been unrolled, this needs to be launched with the exact iteration count.
 template <typename T, int ITERATIONS>
 __global__ void ker_ln_bw_dinp_gt4096(T *inp_grad, const T *out_grad, const T *inp,
                                const T *gamma, const T *betta, const T *vars,
                                const T *means, int hidden_dim) {
   // Here we will allocate dynamic memory for xhat and dxhat on the stack
-  // The stack is fairly generous but it is limited, so use no more than 128kB
+  // The stack is fairly generous but it is limited, so we probably wouldn't want to use this kernel with iterations > 1000 or so
   float4 xhat[ITERATIONS];
   float4 dxhat[ITERATIONS];
 
