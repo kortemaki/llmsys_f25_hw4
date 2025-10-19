@@ -208,7 +208,7 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
 
   const uint idx_x = blockDim.x * blockIdx.x + threadIdx.x;
   const uint idx_y = threadIdx.y;
-  uint size = rows * width;
+  const uint size = rows * width;
   inp += idx_y * width;
   out_grad += idx_y * width;
 
@@ -216,7 +216,7 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   cg::thread_block_tile<TILE_DIM> g = cg::tiled_partition<TILE_DIM>(b);
 
   // Step 1
-  uint stride = blockDim.y * width;
+  const uint stride = blockDim.y * width;
   uint i = idx_x;
   T l_d_gam = 0;
   T l_d_bet = 0;
@@ -328,20 +328,24 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   xhat.w = (inp_j.w - mean) * rstd;
 
   // Step 3
-  float l_sum_dxhat[1];
-  l_sum_dxhat[0] = dxhat.x + dxhat.y + dxhat.z + dxhat.w;
-  blockReduce<ReduceType::kSum, 1>(l_sum_dxhat);
-  float l_sum_xhat_dxhat[1];
-  l_sum_xhat_dxhat[0] = xhat.x * dxhat.x + xhat.y * dxhat.y + xhat.z * dxhat.z + xhat.w * dxhat.w;
-  blockReduce<ReduceType::kSum, 1>(l_sum_xhat_dxhat);
+  float l_sums[2];
+  l_sums[0] = dxhat.x + dxhat.y + dxhat.z + dxhat.w;
+  l_sums[1] = xhat.x * dxhat.x + xhat.y * dxhat.y + xhat.z * dxhat.z + xhat.w * dxhat.w;
+  blockReduce<ReduceType::kSum, 2>(l_sums);
+  static __shared__ float sums[2];
+  if (!(threadIdx.x || threadIdx.y)) {
+    sums[0] = l_sums[0];
+    sums[1] = l_sums[1];
+  }
+  __syncthreads();
 
   // Step 4
   uint m = hidden_dim << 2;
   float4 inp_grad_i = make_float4(
-    dxhat.x * rstd - (l_sum_dxhat[0] + xhat.x * l_sum_xhat_dxhat[0]) * rstd / m,
-    dxhat.y * rstd - (l_sum_dxhat[0] + xhat.y * l_sum_xhat_dxhat[0]) * rstd / m,
-    dxhat.z * rstd - (l_sum_dxhat[0] + xhat.z * l_sum_xhat_dxhat[0]) * rstd / m,
-    dxhat.w * rstd - (l_sum_dxhat[0] + xhat.w * l_sum_xhat_dxhat[0]) * rstd / m
+    dxhat.x * rstd - (sums[0] + xhat.x * sums[1]) * rstd / m,
+    dxhat.y * rstd - (sums[0] + xhat.y * sums[1]) * rstd / m,
+    dxhat.z * rstd - (sums[0] + xhat.z * sums[1]) * rstd / m,
+    dxhat.w * rstd - (sums[0] + xhat.w * sums[1]) * rstd / m
   );
   inp_grad_f4[idx] = inp_grad_i;
   /// END ASSIGN4_2_2
