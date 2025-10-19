@@ -299,6 +299,7 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   if (!vars || !means) {
     assert(false && "Error: invalid input! Both vars and means must be provided.");
   }
+  if (threadIdx.x >= hidden_dim) return;
 
   const uint idx_y = blockIdx.x;
   const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + idx_y * hidden_dim;
