@@ -22,11 +22,11 @@ def debug_layernorm_fw():
     print(x)
 
 def debug_layernorm_bw():
-    f_out_grad = minitorch.tensor(np.random.rand(115, 32).tolist(), backend=backend)
-
-    inp = minitorch.tensor(np.random.rand(115, 32).tolist(), backend=backend, requires_grad=True)
-    gamma = minitorch.tensor(np.random.rand(32).tolist(), backend=backend, requires_grad=True)
-    betta = minitorch.tensor(np.random.rand(32).tolist(), backend=backend, requires_grad=True)
+    batch_size, hidden_dim = 2, 4
+    f_out_grad = minitorch.tensor(np.random.rand(batch_size, hidden_dim).tolist(), backend=backend)
+    inp = minitorch.tensor(np.random.rand(batch_size, hidden_dim).tolist(), backend=backend, requires_grad=True)
+    gamma = minitorch.tensor(np.random.rand(hidden_dim).tolist(), backend=backend, requires_grad=True)
+    betta = minitorch.tensor(np.random.rand(hidden_dim).tolist(), backend=backend, requires_grad=True)
     out = inp.layernorm(gamma, betta)
     out.backward(f_out_grad)
     print("input gradients (yours, expected):")
