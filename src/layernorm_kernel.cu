@@ -337,7 +337,7 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   if (!threadIdx.x) {
     sums[0] = l_sums[0];
     sums[1] = l_sums[1];
-    printf("sums: dxhat %f xhat_dxhat %f\n", sums[0], sums[1]);
+    printf("sums row %d: dxhat %f xhat_dxhat %f\n", blockIdx.x, sums[0], sums[1]);
   }
   __syncthreads();
   printf("thread %d %d xhat [%f, %f, %f, %f] dxhat [%f, %f, %f, %f]\n", blockIdx.x, threadIdx.x, xhat.x, xhat.y, xhat.z, xhat.w, dxhat.x, dxhat.y, dxhat.z, dxhat.w);
