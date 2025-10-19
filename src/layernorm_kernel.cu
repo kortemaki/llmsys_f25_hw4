@@ -120,9 +120,13 @@ void launch_layernorm(float *ln_res, float *vars, float *means,
   int nthread = min(((hidden_dim + 31) / 32) * 32, MAX_THREADS);
   dim3 grid_dim(batch_size);
   dim3 block_dim(nthread);
-
-  ker_layer_norm<float><<<grid_dim, block_dim, 0, stream>>>(
+  if (nthread <= 32) {
+    ker_layer_norm<float><<<grid_dim, block_dim, 0, stream>>>(
       d_ln_res, d_vars, d_means, d_inp, d_scale, d_bias, hidden_dim);
+  } else {
+    throw std::runtime_error(
+        "hidden_dim greater than 128 is currently not supported");
+  }
 
   // Copy back to the host
   cudaMemcpy(ln_res, d_ln_res, output_size, cudaMemcpyDeviceToHost);
