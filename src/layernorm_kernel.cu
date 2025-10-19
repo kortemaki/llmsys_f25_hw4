@@ -300,7 +300,7 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
     assert(false && "Error: invalid input! Both vars and means must be provided.");
   }
 
-  const uint idx_y = blockDim.y * blockIdx.y + threadIdx.y;
+  const uint idx_y = blockIdx.x;
   const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + idx_y * hidden_dim;
   const T mean = means[idx_y];
   const T rstd = rsqrt(vars[idx_y] + LN_EPSILON);
@@ -308,7 +308,7 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   const float4 *gamma_f4 = reinterpret_cast<const float4 *>(gamma);
   float4 *inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad) + idx_y * hidden_dim;
 
-  const uint idx = blockDim.x * blockIdx.x + threadIdx.x;
+  const uint idx = threadIdx.x;
 
   // Step 1
   float4 dxhat;
