@@ -379,6 +379,8 @@ class Attn_Softmax(Function):
     @staticmethod
     def forward(ctx: Context, inp: Tensor, mask: Tensor) -> Tensor:
       #   BEGIN ASSIGN4_1_1
+      inp = inp.contiguous()
+      maks = mask.contiguous()
       ctx.save_for_backward(inp)
       return inp.backend.attn_softmax_fw(inp, mask)
       #   END ASSIGN4_1_1
@@ -387,6 +389,8 @@ class Attn_Softmax(Function):
     def backward(ctx: Context, out_grad: Tensor) -> Tuple[Tensor, float]:
       #   BEGIN ASSIGN4_1_2
       soft_inp, = ctx.saved_values
+      out_grad = out_grad.contiguous()
+      soft_inp = soft_inp.contiguous()
       return out_grad.backend.attn_softmax_bw(out_grad, soft_inp), 0.0
       #   END ASSIGN4_1_2
 
@@ -395,6 +399,9 @@ class LayerNorm(Function):
     @staticmethod
     def forward(ctx: Context, inp: Tensor, gamma: Tensor, beta: Tensor) -> Tensor:
       #   BEGIN ASSIGN4_2_1
+      inp = inp.contiguous()
+      gamma = gamma.contiguous()
+      beta = beta.contiguous()
       ln_res, vars, means = inp.backend.layernorm_fw(inp, gamma, beta)
       ctx.save_for_backward(inp, gamma, beta, vars, means)
       return ln_res
@@ -404,6 +411,11 @@ class LayerNorm(Function):
     def backward(ctx: Context, out_grad: Tensor) -> Tensor:
       #   BEGIN ASSIGN4_2_2
       inp, gamma, beta, vars, means = ctx.saved_values
+      inp = inp.contiguous()
+      gamma = gamma.contiguous()
+      beta = beta.contiguous()
+      vars = vars.contiguous()
+      means = means.contiguous()
       return out_grad.backend.layernorm_bw(out_grad, inp, gamma, beta, vars, means)
       #   END ASSIGN4_2_2
 
