@@ -219,12 +219,11 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   uint stride = blockDim.y * width;
   uint i = idx_x;
   T xhat;
-  T scale = rsqrt(vars[idx_y] + LN_EPSILON);
   T l_d_gam = 0;
   T l_d_bet = 0;
   for (uint i_y = idx_y; i_y < rows; i_y += blockDim.y) {
     if (i >= size) continue;
-    xhat = (inp[i] - means[i_y]) * scale;
+    xhat = (inp[i] - means[i_y]) * rsqrt(vars[idx_y] + LN_EPSILON);
     l_d_gam += out_grad[i] * xhat;
     l_d_bet += out_grad[i];
     i += stride;
