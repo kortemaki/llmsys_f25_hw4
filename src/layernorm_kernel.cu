@@ -23,7 +23,7 @@ It will not only output the layer norm result,
 
 @thread
 gridDim.x = batch_size * seq_len
-blockDim.x = hidden_size
+blockDim.x = min(hidden_size, MAX_THREADS)
 
 @param
 ln_res: [batch_size * seq_len, hidden_size], ln result.
@@ -240,7 +240,7 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
     l_d_gam += g.shfl_down(l_d_gam, i);
     l_d_bet += g.shfl_down(l_d_bet, i);
   }
-  if (!idx_x) {
+  if (!threadIdx.x) {
     betta_buffer[threadIdx.y][threadIdx.x] = l_d_bet;
     gamma_buffer[threadIdx.y][threadIdx.x] = l_d_gam;
   }
