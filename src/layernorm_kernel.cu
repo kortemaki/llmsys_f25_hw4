@@ -45,22 +45,24 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
   // 3. Compute layernorm result with reinterpret_cast by casting to float4 for speedup
 
   // Step 1
-  float l_sum[1];
-  float l_sum2[1];
-  l_sum[0] = 0;
-  l_sum2[0] = 0;
+  float l_sums[2] = {0};
+  static __shared__ float sums[2];
   const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + blockIdx.x * hidden_size;
   for (uint idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
     const float4  val = inp_f4[idx];
-    l_sum[0]  += val.x + val.y + val.z + val.w;
-    l_sum2[0] += val.x * val.x + val.y * val.y + val.z * val.z + val.w * val.w;
+    l_sums[0] += val.x + val.y + val.z + val.w;
+    l_sums[1] += val.x * val.x + val.y * val.y + val.z * val.z + val.w * val.w;
   }
 
   // Step 2
-  blockReduce<ReduceType::kSum, 1>(l_sum);
-  blockReduce<ReduceType::kSum, 1>(l_sum2);
-  const float  mean_x =  l_sum[0] / (hidden_size << 2);
-  const float mean_x2 = l_sum2[0] / (hidden_size << 2);
+  blockReduce<ReduceType::kSum, 2>(l_sums);
+  if (threadIdx.x == 0) {
+    sums[0] = l_sums[0];
+    sums[1] = l_sums[1];
+  }
+  __syncthreads();
+  const float  mean_x = sums[0] / (hidden_size << 2);
+  const float mean_x2 = sums[1] / (hidden_size << 2);
   const float variance = mean_x2 - mean_x * mean_x + LN_EPSILON;
   const float sigma = sqrtf(variance);
 
@@ -384,8 +386,7 @@ void launch_layernorm_bw(float *gamma_grad, float *betta_grad, float *inp_grad,
   // Launch kernels
   // Compute grad of gamma and betta
   // This calculates the number of blocks needed to cover the data along the specified dimension, rounds it up.
-  // The result is then multiplied by TILE_DIM to ensure that the grid size is a multiple of TILE_DIM.
-  dim3 grid_dim(((hidden_dim + TILE_DIM - 1) / TILE_DIM) * TILE_DIM);
+  dim3 grid_dim((hidden_dim + TILE_DIM - 1) / TILE_DIM);
   dim3 block_dim(TILE_DIM, TILE_DIM);
   ker_ln_bw_dgamma_dbetta<float><<<grid_dim, block_dim, 0, stream_1>>>(
       d_gamma_grad, d_betta_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars,
