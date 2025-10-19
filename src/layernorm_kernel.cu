@@ -284,7 +284,7 @@ means: [batch_size * seq_len], mean of ln forward,
   used to compute xhat, maybe nullptr
 */
 template <typename T>
-__global__ void ker_ln_bw_dinp_lt4096(T *inp_grad, const T *out_grad, const T *inp,
+__global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
                                const T *gamma, const T *betta, const T *vars,
                                const T *means, int hidden_dim) {
 
@@ -352,13 +352,12 @@ __global__ void ker_ln_bw_dinp_lt4096(T *inp_grad, const T *out_grad, const T *i
   );
   /// END ASSIGN4_2_2
 }
-template <typename T>
-__global__ void ker_ln_bw_dinp_lt65536(T *inp_grad, const T *out_grad, const T *inp,
+template <typename T, int ITERATIONS>
+__global__ void ker_ln_bw_dinp_gt4096(T *inp_grad, const T *out_grad, const T *inp,
                                const T *gamma, const T *betta, const T *vars,
                                const T *means, int hidden_dim) {
   // Here we will allocate dynamic memory for xhat and dxhat on the stack
-  // The stack is fairly generous but it is limited, so use no more than 500kB
-  const uint ITERATIONS = hidden_dim / MAX_THREADS;
+  // The stack is fairly generous but it is limited, so use no more than 128kB
   float4 xhat[ITERATIONS];
   float4 dxhat[ITERATIONS];
 
@@ -377,8 +376,10 @@ __global__ void ker_ln_bw_dinp_lt65536(T *inp_grad, const T *out_grad, const T *
   const uint idx = threadIdx.x;
   float l_sums[2];
   __shared__ float sums[2];
+  uint i = idx;
   uint k = 0;
-  for (uint i = idx; i < hidden_dim; i += blockDim.x) {
+  #pragma unroll
+  for (; k < ITERATIONS - 1; k++) {
     // Step 1
     const float4 y_j = out_grad_f4[i];
     const float4 gamma_j = gamma_f4[i];
@@ -401,7 +402,32 @@ __global__ void ker_ln_bw_dinp_lt65536(T *inp_grad, const T *out_grad, const T *
     // Step 3
     l_sums[0] = dxhat[k].x + dxhat[k].y + dxhat[k].z + dxhat[k].w;
     l_sums[1] = xhat[k].x * dxhat[k].x + xhat[k].y * dxhat[k].y + xhat[k].z * dxhat[k].z + xhat[k].w * dxhat[k].w;
-    k += 1;
+    i += blockDim.x;
+  }
+  // manually unroll the last iteration to avoid a branch in the loop
+  if (i < hidden_dim) {
+    // Step 1
+    const float4 y_j = out_grad_f4[i];
+    const float4 gamma_j = gamma_f4[i];
+    dxhat[k] = make_float4(
+      y_j.x * gamma_j.x,
+      y_j.y * gamma_j.y,
+      y_j.z * gamma_j.z,
+      y_j.w * gamma_j.w
+    );
+
+    // Step 2
+    const float4 inp_j = inp_f4[i];
+    xhat[k] = make_float4(
+      (inp_j.x - mean) * rstd,
+      (inp_j.y - mean) * rstd,
+      (inp_j.z - mean) * rstd,
+      (inp_j.w - mean) * rstd
+    );
+
+    // Step 3
+    l_sums[0] = dxhat[k].x + dxhat[k].y + dxhat[k].z + dxhat[k].w;
+    l_sums[1] = xhat[k].x * dxhat[k].x + xhat[k].y * dxhat[k].y + xhat[k].z * dxhat[k].z + xhat[k].w * dxhat[k].w;
   }
 
   blockReduce<ReduceType::kSum, 2>(l_sums);
@@ -416,8 +442,10 @@ __global__ void ker_ln_bw_dinp_lt65536(T *inp_grad, const T *out_grad, const T *
   uint m = hidden_dim << 2;
   float sum_dxhat_m = sums[0] / m;
   float sum_xhat_dxhat_m = sums[1] / m;
+  i = idx;
   k = 0;
-  for (uint i = idx; i < hidden_dim; i += blockDim.x) {
+  #pragma unroll
+  for (; k < ITERATIONS - 1; k++) {
     float4 inp_grad_i = make_float4(
       (dxhat[k].x - sum_dxhat_m + xhat[k].x * sum_xhat_dxhat_m) * rstd,
       (dxhat[k].y - sum_dxhat_m + xhat[k].y * sum_xhat_dxhat_m) * rstd,
@@ -425,12 +453,21 @@ __global__ void ker_ln_bw_dinp_lt65536(T *inp_grad, const T *out_grad, const T *
       (dxhat[k].w - sum_dxhat_m + xhat[k].w * sum_xhat_dxhat_m) * rstd
     );
     inp_grad_f4[i] = inp_grad_i;
-    k += 1;
+    i += blockDim.x;
   }
+  // manually unroll the last loop because of early returns
+  if (i >= hidden_dim) return;
+  float4 inp_grad_i = make_float4(
+    (dxhat[k].x - sum_dxhat_m + xhat[k].x * sum_xhat_dxhat_m) * rstd,
+    (dxhat[k].y - sum_dxhat_m + xhat[k].y * sum_xhat_dxhat_m) * rstd,
+    (dxhat[k].z - sum_dxhat_m + xhat[k].z * sum_xhat_dxhat_m) * rstd,
+    (dxhat[k].w - sum_dxhat_m + xhat[k].w * sum_xhat_dxhat_m) * rstd
+  );
+  inp_grad_f4[i] = inp_grad_i;
   /// END ASSIGN4_2_2
 }
 template <typename T>
-__global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
+__global__ void ker_ln_bw_dinp_gt16384(T *inp_grad, const T *out_grad, const T *inp,
                                const T *gamma, const T *betta, const T *vars,
                                const T *means, int hidden_dim) {
   // Here we will allocate dynamic memory for xhat and dxhat on the heap
@@ -555,13 +592,19 @@ void launch_layernorm_bw(float *gamma_grad, float *betta_grad, float *inp_grad,
   hidden_dim >>= 2;
   int nthread = min(((hidden_dim + 31) / 32) * 32, MAX_THREADS);
   if (hidden_dim <= 4096) {
-    ker_ln_bw_dinp_lt4096<float><<<batch_size, nthread, 0, stream_2>>>(
+    ker_ln_bw_dinp<float><<<batch_size, nthread, 0, stream_2>>>(
       d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
-  } else if (hidden_dim <= 65536) {
-    ker_ln_bw_dinp_lt65536<float><<<batch_size, nthread, 0, stream_2>>>(
+  } else if (hidden_dim <= 8192) {
+    ker_ln_bw_dinp_gt4096<float, 2><<<batch_size, nthread, 0, stream_2>>>(
+      d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
+  } else if (hidden_dim <= 12288) {
+    ker_ln_bw_dinp_gt4096<float, 3><<<batch_size, nthread, 0, stream_2>>>(
+      d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
+  } else if (hidden_dim <= 16384) {
+    ker_ln_bw_dinp_gt4096<float, 4><<<batch_size, nthread, 0, stream_2>>>(
       d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
   } else {
-    ker_ln_bw_dinp<float><<<batch_size, nthread, 0, stream_2>>>(
+    ker_ln_bw_dinp_gt16384<float><<<batch_size, nthread, 0, stream_2>>>(
       d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
   }
 
