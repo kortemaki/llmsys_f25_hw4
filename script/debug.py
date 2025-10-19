@@ -22,11 +22,11 @@ def debug_layernorm_fw():
     print(x)
 
 def debug_layernorm_bw():
-    f_out_grad = minitorch.tensor([[.1,.2,.3,.4,.5,.6,.7,.8]], backend=backend)
+    f_out_grad = minitorch.tensor(np.random.rand(115, 32).tolist(), backend=backend)
 
-    inp = minitorch.tensor([[1,2,3,4,5,6,7,8]], backend=backend, requires_grad=True)
-    gamma = minitorch.tensor([10,20,30,40,50,60,70,80], backend=backend, requires_grad=True)
-    betta = minitorch.tensor([100,200,300,400,500,600,700,800], backend=backend, requires_grad=True)
+    inp = minitorch.tensor(np.random.rand(115, 32).tolist(), backend=backend, requires_grad=True)
+    gamma = minitorch.tensor(np.random.rand(32).tolist(), backend=backend, requires_grad=True)
+    betta = minitorch.tensor(np.random.rand(32).tolist(), backend=backend, requires_grad=True)
     out = inp.layernorm(gamma, betta)
     out.backward(f_out_grad)
     print("input gradients (yours, expected):")
@@ -79,4 +79,4 @@ def debug_softmax_bw():
     print(res)
 
 if __name__ == '__main__':
-    debug_layernorm_fw()
+    debug_layernorm_bw()
