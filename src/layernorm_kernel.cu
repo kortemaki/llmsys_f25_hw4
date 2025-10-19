@@ -577,27 +577,27 @@ void launch_layernorm_bw(float *gamma_grad, float *betta_grad, float *inp_grad,
       d_means, batch_size, hidden_dim);
 
   // Compute grad of input
-  if (hidden_dim % 4 != 0) {
-    throw std::runtime_error("hidden_dim % 4 != 0");
+  if (hidden_dim % 4 != 0 || hidden_dim > 4096) {
+    throw std::runtime_error("hidden_dim % 4 != 0 || hidden_dim > 4096");
   }
   hidden_dim >>= 2;
   int nthread = min(((hidden_dim + 31) / 32) * 32, MAX_THREADS);
-  if (hidden_dim <= 4096) {
-    ker_ln_bw_dinp<float><<<batch_size, nthread, 0, stream_2>>>(
-      d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
-  } else if (hidden_dim <= 8192) {
-    ker_ln_bw_dinp_gt4096<float, 2><<<batch_size, nthread, 0, stream_2>>>(
-      d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
-  } else if (hidden_dim <= 12288) {
-    ker_ln_bw_dinp_gt4096<float, 3><<<batch_size, nthread, 0, stream_2>>>(
-      d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
-  } else if (hidden_dim <= 16384) {
-    ker_ln_bw_dinp_gt4096<float, 4><<<batch_size, nthread, 0, stream_2>>>(
-      d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
-  } else {
-    ker_ln_bw_dinp_gt16384<float><<<batch_size, nthread, 0, stream_2>>>(
-      d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
-  }
+  //if (hidden_dim <= 4096) {
+  ker_ln_bw_dinp<float><<<batch_size, nthread, 0, stream_2>>>(
+    d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
+  //} else if (hidden_dim <= 8192) {
+  //  ker_ln_bw_dinp_gt4096<float, 2><<<batch_size, nthread, 0, stream_2>>>(
+  //    d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
+  //} else if (hidden_dim <= 12288) {
+  //  ker_ln_bw_dinp_gt4096<float, 3><<<batch_size, nthread, 0, stream_2>>>(
+  //    d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
+  //} else if (hidden_dim <= 16384) {
+  //  ker_ln_bw_dinp_gt4096<float, 4><<<batch_size, nthread, 0, stream_2>>>(
+  //    d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
+  //} else {
+  //  ker_ln_bw_dinp_gt16384<float><<<batch_size, nthread, 0, stream_2>>>(
+  //    d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
+  //}
 
   // Synchronize and check for errors
   cudaDeviceSynchronize();
