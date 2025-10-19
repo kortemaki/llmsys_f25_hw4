@@ -345,10 +345,10 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   float sum_dxhat_m = sums[0] / m;
   float sum_xhat_dxhat_m = sums[1] / m;
   inp_grad_f4[idx] = make_float4(
-    (dxhat.x - sum_dxhat_m + xhat.x * sum_xhat_dxhat_m) * rstd,
-    (dxhat.y - sum_dxhat_m + xhat.y * sum_xhat_dxhat_m) * rstd,
-    (dxhat.z - sum_dxhat_m + xhat.z * sum_xhat_dxhat_m) * rstd,
-    (dxhat.w - sum_dxhat_m + xhat.w * sum_xhat_dxhat_m) * rstd
+    (dxhat.x - sum_dxhat_m - xhat.x * sum_xhat_dxhat_m) * rstd,
+    (dxhat.y - sum_dxhat_m - xhat.y * sum_xhat_dxhat_m) * rstd,
+    (dxhat.z - sum_dxhat_m - xhat.z * sum_xhat_dxhat_m) * rstd,
+    (dxhat.w - sum_dxhat_m - xhat.w * sum_xhat_dxhat_m) * rstd
   );
   /// END ASSIGN4_2_2
 }
@@ -448,10 +448,10 @@ __global__ void ker_ln_bw_dinp_gt4096(T *inp_grad, const T *out_grad, const T *i
   #pragma unroll
   for (; k < ITERATIONS - 1; k++) {
     float4 inp_grad_i = make_float4(
-      (dxhat[k].x - sum_dxhat_m + xhat[k].x * sum_xhat_dxhat_m) * rstd,
-      (dxhat[k].y - sum_dxhat_m + xhat[k].y * sum_xhat_dxhat_m) * rstd,
-      (dxhat[k].z - sum_dxhat_m + xhat[k].z * sum_xhat_dxhat_m) * rstd,
-      (dxhat[k].w - sum_dxhat_m + xhat[k].w * sum_xhat_dxhat_m) * rstd
+      (dxhat[k].x - sum_dxhat_m - xhat[k].x * sum_xhat_dxhat_m) * rstd,
+      (dxhat[k].y - sum_dxhat_m - xhat[k].y * sum_xhat_dxhat_m) * rstd,
+      (dxhat[k].z - sum_dxhat_m - xhat[k].z * sum_xhat_dxhat_m) * rstd,
+      (dxhat[k].w - sum_dxhat_m - xhat[k].w * sum_xhat_dxhat_m) * rstd
     );
     inp_grad_f4[i] = inp_grad_i;
     i += blockDim.x;
@@ -459,10 +459,10 @@ __global__ void ker_ln_bw_dinp_gt4096(T *inp_grad, const T *out_grad, const T *i
   // manually unroll the last loop because of early returns
   if (i >= hidden_dim) return;
   float4 inp_grad_i = make_float4(
-    (dxhat[k].x - sum_dxhat_m + xhat[k].x * sum_xhat_dxhat_m) * rstd,
-    (dxhat[k].y - sum_dxhat_m + xhat[k].y * sum_xhat_dxhat_m) * rstd,
-    (dxhat[k].z - sum_dxhat_m + xhat[k].z * sum_xhat_dxhat_m) * rstd,
-    (dxhat[k].w - sum_dxhat_m + xhat[k].w * sum_xhat_dxhat_m) * rstd
+    (dxhat[k].x - sum_dxhat_m - xhat[k].x * sum_xhat_dxhat_m) * rstd,
+    (dxhat[k].y - sum_dxhat_m - xhat[k].y * sum_xhat_dxhat_m) * rstd,
+    (dxhat[k].z - sum_dxhat_m - xhat[k].z * sum_xhat_dxhat_m) * rstd,
+    (dxhat[k].w - sum_dxhat_m - xhat[k].w * sum_xhat_dxhat_m) * rstd
   );
   inp_grad_f4[i] = inp_grad_i;
   /// END ASSIGN4_2_2
@@ -534,10 +534,10 @@ __global__ void ker_ln_bw_dinp_gt16384(T *inp_grad, const T *out_grad, const T *
   k = 0;
   for (uint i = idx; i < hidden_dim; i += blockDim.x) {
     float4 inp_grad_i = make_float4(
-      (dxhat[k].x - sum_dxhat_m + xhat[k].x * sum_xhat_dxhat_m) * rstd,
-      (dxhat[k].y - sum_dxhat_m + xhat[k].y * sum_xhat_dxhat_m) * rstd,
-      (dxhat[k].z - sum_dxhat_m + xhat[k].z * sum_xhat_dxhat_m) * rstd,
-      (dxhat[k].w - sum_dxhat_m + xhat[k].w * sum_xhat_dxhat_m) * rstd
+      (dxhat[k].x - sum_dxhat_m - xhat[k].x * sum_xhat_dxhat_m) * rstd,
+      (dxhat[k].y - sum_dxhat_m - xhat[k].y * sum_xhat_dxhat_m) * rstd,
+      (dxhat[k].z - sum_dxhat_m - xhat[k].z * sum_xhat_dxhat_m) * rstd,
+      (dxhat[k].w - sum_dxhat_m - xhat[k].w * sum_xhat_dxhat_m) * rstd
     );
     inp_grad_f4[i] = inp_grad_i;
     k += 1;
