@@ -46,7 +46,7 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
 
   // Step 1
   float l_sums[2] = {0};
-  static __shared__ float sums[2];
+  __shared__ float sums[2];
   const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + blockIdx.x * hidden_size;
   for (uint idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
     const float4  val = inp_f4[idx];
@@ -333,7 +333,7 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   l_sums[1] = xhat.x * dxhat.x + xhat.y * dxhat.y + xhat.z * dxhat.z + xhat.w * dxhat.w;
   blockReduce<ReduceType::kSum, 2>(l_sums);
   __shared__ float sums[2];
-  if (!(threadIdx.x || threadIdx.y)) {
+  if (!threadIdx.x) {
     sums[0] = l_sums[0];
     sums[1] = l_sums[1];
   }
@@ -342,10 +342,10 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   // Step 4
   uint m = hidden_dim << 2;
   float4 inp_grad_i = make_float4(
-    dxhat.x * rstd - (sums[0] + xhat.x * sums[1]) * rstd / m,
-    dxhat.y * rstd - (sums[0] + xhat.y * sums[1]) * rstd / m,
-    dxhat.z * rstd - (sums[0] + xhat.z * sums[1]) * rstd / m,
-    dxhat.w * rstd - (sums[0] + xhat.w * sums[1]) * rstd / m
+    (dxhat.x - (sums[0] + xhat.x * sums[1]) / m) * rstd,
+    (dxhat.y - (sums[0] + xhat.y * sums[1]) / m) * rstd,
+    (dxhat.z - (sums[0] + xhat.z * sums[1]) / m) * rstd,
+    (dxhat.w - (sums[0] + xhat.w * sums[1]) / m) * rstd
   );
   inp_grad_f4[idx] = inp_grad_i;
   /// END ASSIGN4_2_2
