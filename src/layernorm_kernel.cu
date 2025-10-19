@@ -201,9 +201,6 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   __shared__ float betta_buffer[TILE_DIM][TILE_DIM];
   __shared__ float gamma_buffer[TILE_DIM][TILE_DIM];
 
-  if (!vars || !means) {
-    assert(false && "Error: invalid input! Both vars and means must be provided.");
-  }
   if (blockIdx.y) return;
 
   const uint idx_x = blockDim.x * blockIdx.x + threadIdx.x;
@@ -296,38 +293,38 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   // 3. Compute reduce sum for dxhat and dxhat*xhat with blockReduce
   // 4. Compute final gradient
 
-  if (!vars || !means) {
-    assert(false && "Error: invalid input! Both vars and means must be provided.");
-  }
   if (threadIdx.x >= hidden_dim) return;
 
   const uint idx_y = blockIdx.x;
-  const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + idx_y * hidden_dim;
+  const uint offset = idx_y * hidden_dim;
+  const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + offset;
   const T mean = means[idx_y];
   const T rstd = rsqrt(vars[idx_y] + LN_EPSILON);
-  const float4 *out_grad_f4 = reinterpret_cast<const float4 *>(out_grad) + idx_y * hidden_dim;
+  const float4 *out_grad_f4 = reinterpret_cast<const float4 *>(out_grad) + offset;
   const float4 *gamma_f4 = reinterpret_cast<const float4 *>(gamma);
-  float4 *inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad) + idx_y * hidden_dim;
+  float4 *inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad) + offset;
 
   const uint idx = threadIdx.x;
-  float4 dxhat;
-  float4 xhat;
   float l_sums[2];
   __shared__ float sums[2];
 
   const float4 y_j = out_grad_f4[idx];
   const float4 gamma_j = gamma_f4[idx];
-  dxhat.x = y_j.x * gamma_j.x;
-  dxhat.y = y_j.y * gamma_j.y;
-  dxhat.z = y_j.z * gamma_j.z;
-  dxhat.w = y_j.w * gamma_j.w;
+  const float4 dxhat = make_float4(
+    y_j.x * gamma_j.x,
+    y_j.y * gamma_j.y,
+    y_j.z * gamma_j.z,
+    y_j.w * gamma_j.w
+  );
 
   // Step 2
   const float4 inp_j = inp_f4[idx];
-  xhat.x = (inp_j.x - mean) * rstd;
-  xhat.y = (inp_j.y - mean) * rstd;
-  xhat.z = (inp_j.z - mean) * rstd;
-  xhat.w = (inp_j.w - mean) * rstd;
+  const float4 xhat = make_float4(
+    (inp_j.x - mean) * rstd,
+    (inp_j.y - mean) * rstd,
+    (inp_j.z - mean) * rstd,
+    (inp_j.w - mean) * rstd
+  );
 
   // Step 3
   l_sums[0] = dxhat.x + dxhat.y + dxhat.z + dxhat.w;
@@ -337,10 +334,10 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
   if (!threadIdx.x) {
     sums[0] = l_sums[0];
     sums[1] = l_sums[1];
-    printf("sums row %d: dxhat %f xhat_dxhat %f\n", blockIdx.x, sums[0], sums[1]);
+    //printf("sums row %d: dxhat %f xhat_dxhat %f\n", blockIdx.x, sums[0], sums[1]);
   }
   __syncthreads();
-  printf("thread %d %d xhat [%f, %f, %f, %f] dxhat [%f, %f, %f, %f]\n", blockIdx.x, threadIdx.x, xhat.x, xhat.y, xhat.z, xhat.w, dxhat.x, dxhat.y, dxhat.z, dxhat.w);
+  //printf("thread %d %d xhat [%f, %f, %f, %f] dxhat [%f, %f, %f, %f]\n", blockIdx.x, threadIdx.x, xhat.x, xhat.y, xhat.z, xhat.w, dxhat.x, dxhat.y, dxhat.z, dxhat.w);
 
   // Step 4
   // divide both sums by m here to save repeated divides below
@@ -365,17 +362,14 @@ __global__ void ker_ln_bw_dinp_gt4096(T *inp_grad, const T *out_grad, const T *i
   float4 xhat[ITERATIONS];
   float4 dxhat[ITERATIONS];
 
-  if (!vars || !means) {
-    assert(false && "Error: invalid input! Both vars and means must be provided.");
-  }
-
   const uint idx_y = blockIdx.x;
-  const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + idx_y * hidden_dim;
+  const uint offset = idx_y * hidden_dim;
+  const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + offset;
   const T mean = means[idx_y];
   const T rstd = rsqrt(vars[idx_y] + LN_EPSILON);
-  const float4 *out_grad_f4 = reinterpret_cast<const float4 *>(out_grad) + idx_y * hidden_dim;
+  const float4 *out_grad_f4 = reinterpret_cast<const float4 *>(out_grad) + offset;
   const float4 *gamma_f4 = reinterpret_cast<const float4 *>(gamma);
-  float4 *inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad) + idx_y * hidden_dim;
+  float4 *inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad) + offset;
 
   const uint idx = threadIdx.x;
   float l_sums[2];
@@ -450,24 +444,22 @@ __global__ void ker_ln_bw_dinp_gt4096(T *inp_grad, const T *out_grad, const T *i
   k = 0;
   #pragma unroll
   for (; k < ITERATIONS - 1; k++) {
-    float4 inp_grad_i = make_float4(
+    inp_grad_f4[i] = make_float4(
       (dxhat[k].x - sum_dxhat_m - xhat[k].x * sum_xhat_dxhat_m) * rstd,
       (dxhat[k].y - sum_dxhat_m - xhat[k].y * sum_xhat_dxhat_m) * rstd,
       (dxhat[k].z - sum_dxhat_m - xhat[k].z * sum_xhat_dxhat_m) * rstd,
       (dxhat[k].w - sum_dxhat_m - xhat[k].w * sum_xhat_dxhat_m) * rstd
     );
-    inp_grad_f4[i] = inp_grad_i;
     i += blockDim.x;
   }
   // manually unroll the last loop because of early returns
   if (i >= hidden_dim) return;
-  float4 inp_grad_i = make_float4(
+  inp_grad_f4[i] = make_float4(
     (dxhat[k].x - sum_dxhat_m - xhat[k].x * sum_xhat_dxhat_m) * rstd,
     (dxhat[k].y - sum_dxhat_m - xhat[k].y * sum_xhat_dxhat_m) * rstd,
     (dxhat[k].z - sum_dxhat_m - xhat[k].z * sum_xhat_dxhat_m) * rstd,
     (dxhat[k].w - sum_dxhat_m - xhat[k].w * sum_xhat_dxhat_m) * rstd
   );
-  inp_grad_f4[i] = inp_grad_i;
   /// END ASSIGN4_2_2
 }
 template <typename T>
@@ -480,17 +472,14 @@ __global__ void ker_ln_bw_dinp_gt16384(T *inp_grad, const T *out_grad, const T *
   float4 *xhat = (float4*) malloc(ITERATIONS * sizeof(float4));
   float4 *dxhat = (float4*) malloc(ITERATIONS * sizeof(float4));
 
-  if (!vars || !means) {
-    assert(false && "Error: invalid input! Both vars and means must be provided.");
-  }
-
   const uint idx_y = blockIdx.x;
-  const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + idx_y * hidden_dim;
+  const uint offset = idx_y * hidden_dim;
+  const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + offset;
   const T mean = means[idx_y];
   const T rstd = rsqrt(vars[idx_y] + LN_EPSILON);
-  const float4 *out_grad_f4 = reinterpret_cast<const float4 *>(out_grad) + idx_y * hidden_dim;
+  const float4 *out_grad_f4 = reinterpret_cast<const float4 *>(out_grad) + offset;
   const float4 *gamma_f4 = reinterpret_cast<const float4 *>(gamma);
-  float4 *inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad) + idx_y * hidden_dim;
+  float4 *inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad) + offset;
 
   const uint idx = threadIdx.x;
   float l_sums[2];
@@ -536,13 +525,12 @@ __global__ void ker_ln_bw_dinp_gt16384(T *inp_grad, const T *out_grad, const T *
   float sum_xhat_dxhat_m = sums[1] / m;
   k = 0;
   for (uint i = idx; i < hidden_dim; i += blockDim.x) {
-    float4 inp_grad_i = make_float4(
+    inp_grad_f4[i] = make_float4(
       (dxhat[k].x - sum_dxhat_m - xhat[k].x * sum_xhat_dxhat_m) * rstd,
       (dxhat[k].y - sum_dxhat_m - xhat[k].y * sum_xhat_dxhat_m) * rstd,
       (dxhat[k].z - sum_dxhat_m - xhat[k].z * sum_xhat_dxhat_m) * rstd,
       (dxhat[k].w - sum_dxhat_m - xhat[k].w * sum_xhat_dxhat_m) * rstd
     );
-    inp_grad_f4[i] = inp_grad_i;
     k += 1;
   }
   free(xhat);
