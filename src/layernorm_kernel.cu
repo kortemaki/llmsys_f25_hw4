@@ -234,6 +234,7 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
   if (blockIdx.y) return;
 
   const uint idx_x = blockDim.x * blockIdx.x + threadIdx.x;
+  const uint idx_out = blockDim.x * blockIdx.x + threadIdx.y;
   const uint idx_y = threadIdx.y;
   const uint size = rows * width;
   inp += idx_y * width;
@@ -267,15 +268,9 @@ __global__ void ker_ln_bw_dgamma_dbetta(T *gamma_grad, T *betta_grad,
     l_d_bet += g.shfl_down(l_d_bet, i);
   }
   if (!threadIdx.x) {
-    betta_buffer[threadIdx.y][threadIdx.x] = l_d_bet;
-    gamma_buffer[threadIdx.y][threadIdx.x] = l_d_gam;
+    gamma_grad[idx_out] = l_d_gam;
+    betta_grad[idx_out] = l_d_bet;
   }
-  __syncthreads();
-
-  // Step 4
-  if (idx_y || (idx_x >= width)) return;
-  gamma_grad[idx_x] = gamma_buffer[threadIdx.x][threadIdx.y];
-  betta_grad[idx_x] = betta_buffer[threadIdx.x][threadIdx.y];
   /// END ASSIGN4_2_2
 }
 
