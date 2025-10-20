@@ -24,8 +24,9 @@ It will not only output the layer norm result,
   the means argument is nullptr
 
 @thread
-gridDim.x = batch_size * seq_len
-blockDim.x = min(hidden_size, MAX_THREADS)
+gridDim.x = batch_size * seq_len / 32
+blockDim.x = TILE_DIM
+blockDim.y = TILE_DIM
 
 @param
 ln_res: [batch_size * seq_len, hidden_size], ln result.
@@ -37,7 +38,7 @@ bias: [hidden_size], ln bias
 */
 template <typename T>
 __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
-                               const T *scale, const T *bias, int hidden_size) {
+                               const T *scale, const T *bias, int rows, int hidden_size) {
 
   /// BEGIN ASSIGN4_2_1
   /// TODO
@@ -46,29 +47,32 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
   // 2. Compute reduce sum with blockReduce and add epsilon with LN_EPSILON
   // 3. Compute layernorm result with reinterpret_cast by casting to float4 for speedup
   /* I decided to use a burst access to get and write the row using shared memory. */
+  const uint idx_y = blockIdx.x * blockDim.y + threadIdx.y;
+  if (idx_y >= rows) return;
+
   const uint ROW_SIZE = (hidden_size << 2);
-  T row_page[4];
-  T scale_page[4];
-  T bias_page[4];
-  T ln_res_page[4];
-  typedef cub::BlockLoad<T, MAX_THREADS, 4, cub::BLOCK_LOAD_VECTORIZE>
+  const uint F4_PER_PAGE = 1;
+  const uint PAGE_SIZE = F4_PER_PAGE * 4;
+  T row_page[PAGE_SIZE];
+  T scale_page[PAGE_SIZE];
+  T bias_page[PAGE_SIZE];
+  T ln_res_page[PAGE_SIZE];
+  typedef cub::BlockLoad<T, MAX_THREADS, PAGE_SIZE, cub::BLOCK_LOAD_VECTORIZE>
       BlockLoad;
   __shared__ typename BlockLoad::TempStorage ts_load;
-  typedef cub::BlockStore<T, MAX_THREADS, 4, cub::BLOCK_STORE_VECTORIZE>
+  typedef cub::BlockStore<T, MAX_THREADS, PAGE_SIZE, cub::BLOCK_STORE_VECTORIZE>
       BlockStore;
   __shared__ typename BlockStore::TempStorage ts_store;
 
   // Step 1
   float l_sums[2] = {0};
   __shared__ float sums[2];
-
-  uint row_offset = blockIdx.x * ROW_SIZE;
+  uint row_offset = idx_y * ROW_SIZE;
   uint row_x = threadIdx.x;
-  for (uint page_offset = 0; page_offset < hidden_size; page_offset += blockDim.x) {
-    if (page_offset + row_x >= hidden_size) break;
-    uint n_els = min(hidden_size - page_offset, MAX_THREADS) << 2;
-    BlockLoad(ts_load).Load( inp + row_offset + page_offset, row_page, n_els );
-    float4 val = reinterpret_cast<float4 *>( row_page )[0];
+  BlockLoad(ts_load).Load( inp + row_offset, row_page, ROW_SIZE );
+  for (uint i = 0; i < F4_PER_PAGE; i++) {
+    if (row_x + i >= hidden_size) break;
+    float4 val = reinterpret_cast<float4 *>( row_page )[i];
     l_sums[0] += val.x + val.y + val.z + val.w;
     l_sums[1] += val.x * val.x + val.y * val.y + val.z * val.z + val.w * val.w;
   }
@@ -87,31 +91,30 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
 
   // Step 3
   if (threadIdx.x == 0) {
-    if (means) means[blockIdx.x] = mean_x;
-    vars[blockIdx.x] = variance;
+    if (means) means[idx_y] = mean_x;
+    vars[idx_y] = variance;
   }
   float4 val;
   float4 scale_i;
   float4 bias_i;
   float4 *ln_res_i_f4 = reinterpret_cast<float4 *>(ln_res_page);
   row_x = threadIdx.x;
-  for (uint page_offset = 0; page_offset < hidden_size; page_offset += blockDim.x) {
-    if (page_offset + row_x >= hidden_size) return;
-    uint n_els = min(hidden_size - page_offset, MAX_THREADS) << 2;
-    BlockLoad(ts_load).Load( inp + row_offset + page_offset, row_page, n_els );
-    BlockLoad(ts_load).Load( scale + page_offset, scale_page, n_els );
-    BlockLoad(ts_load).Load( bias  + page_offset, bias_page,  n_els );
-    val     = reinterpret_cast<float4 *>( row_page   )[0];
-    scale_i = reinterpret_cast<float4 *>( scale_page )[0];
-    bias_i  = reinterpret_cast<float4 *>( bias_page  )[0];
-    (*ln_res_i_f4)  = make_float4(
+  BlockLoad(ts_load).Load( inp + row_offset, row_page, ROW_SIZE );
+  BlockLoad(ts_load).Load( scale, scale_page, ROW_SIZE );
+  BlockLoad(ts_load).Load( bias, bias_page,  ROW_SIZE );
+  for (uint i = 0; i < F4_PER_PAGE; i++) {
+    if (row_x + i >= hidden_size) return;
+    val     = reinterpret_cast<float4 *>( row_page   )[i];
+    scale_i = reinterpret_cast<float4 *>( scale_page )[i];
+    bias_i  = reinterpret_cast<float4 *>( bias_page  )[i];
+    ln_res_i_f4[i]  = make_float4(
       scale_i.x * (val.x - mean_x) * rsigma + bias_i.x,
       scale_i.y * (val.y - mean_x) * rsigma + bias_i.y,
       scale_i.z * (val.z - mean_x) * rsigma + bias_i.z,
       scale_i.w * (val.w - mean_x) * rsigma + bias_i.w
     );
-    BlockStore(ts_store).Store( ln_res + row_offset + page_offset, ln_res_page, n_els );
   }
+  BlockStore(ts_store).Store( ln_res + row_offset, ln_res_page, ROW_SIZE );
   /// END ASSIGN4_2_1
 }
 
@@ -120,8 +123,8 @@ void launch_layernorm(float *ln_res, float *vars, float *means,
                               const float *inp, const float *scale,
                               const float *bias, int batch_size, int hidden_dim,
                               cudaStream_t stream) {
-  if (hidden_dim % 4 != 0) {
-    throw std::runtime_error("violate hidden_dim % 4 = 0");
+  if (hidden_dim % 4 != 0 || hidden_dim > 4096) {
+    throw std::runtime_error("hidden_dim % 4 != 0 || hidden_dim > 4096");
   }
   int float_size = sizeof(float);
   int input_size = batch_size * hidden_dim * float_size;
@@ -146,11 +149,11 @@ void launch_layernorm(float *ln_res, float *vars, float *means,
 
   // For using float4
   hidden_dim >>= 2;
-  int nthread = min(((hidden_dim + 31) / 32) * 32, MAX_THREADS);
-  dim3 grid_dim(batch_size);
-  dim3 block_dim(nthread);
+  int nbatch = min(((batch_size + TILE_DIM - 1) / TILE_DIM) * TILE_DIM, MAX_THREADS);
+  dim3 grid_dim(nbatch);
+  dim3 block_dim(MAX_THREADS, 1);
   ker_layer_norm<float><<<grid_dim, block_dim, 0, stream>>>(
-    d_ln_res, d_vars, d_means, d_inp, d_scale, d_bias, hidden_dim);
+    d_ln_res, d_vars, d_means, d_inp, d_scale, d_bias, batch_size, hidden_dim);
 
   // Copy back to the host
   cudaMemcpy(ln_res, d_ln_res, output_size, cudaMemcpyDeviceToHost);
