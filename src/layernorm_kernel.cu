@@ -320,20 +320,39 @@ __global__ void ker_ln_bw_dinp_original(T *inp_grad, const T *out_grad, const T 
   if (threadIdx.x >= hidden_dim) return;
 
   const uint idx_y = blockIdx.x;
-  const uint offset = idx_y * hidden_dim;
-  const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + offset;
+  //const uint offset = idx_y * hidden_dim;
+  const uint PAGE_SIZE = 4 * 1;
+  T inp_page[PAGE_SIZE];
+  T out_grad_page[PAGE_SIZE];
+  T gamma_page[PAGE_SIZE];
+  T inp_grad_page[PAGE_SIZE];
+  //const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + offset;
   const T mean = means[idx_y];
   const T rstd = rsqrt(vars[idx_y] + LN_EPSILON);
-  const float4 *out_grad_f4 = reinterpret_cast<const float4 *>(out_grad) + offset;
-  const float4 *gamma_f4 = reinterpret_cast<const float4 *>(gamma);
-  float4 *inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad) + offset;
+  //const float4 *out_grad_f4 = reinterpret_cast<const float4 *>(out_grad) + offset;
+  //const float4 *gamma_f4 = reinterpret_cast<const float4 *>(gamma);
+  //float4 *inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad) + offset;
 
-  const uint idx = threadIdx.x;
+  typedef cub::BlockLoad<T, MAX_THREADS, PAGE_SIZE, cub::BLOCK_LOAD_VECTORIZE>
+      BlockLoad;
+  __shared__ typename BlockLoad::TempStorage ts_load;
+  typedef cub::BlockStore<T, MAX_THREADS, PAGE_SIZE, cub::BLOCK_STORE_VECTORIZE>
+      BlockStore;
+  __shared__ typename BlockStore::TempStorage ts_store;
+  const uint ROW_SIZE = ((uint) hidden_dim << 2);
+  const uint row_offset = idx_y * ROW_SIZE;
+  BlockLoad(ts_load).Load( inp + row_offset, inp_page, ROW_SIZE );
+  BlockLoad(ts_load).Load( out_grad + row_offset, out_grad_page, ROW_SIZE );
+  BlockLoad(ts_load).Load( gamma, gamma_page, ROW_SIZE );
+
+  //const uint idx = threadIdx.x;
   float l_sums[2];
   __shared__ float sums[2];
 
-  const float4 y_j = out_grad_f4[idx];
-  const float4 gamma_j = gamma_f4[idx];
+  const float4 y_j = reinterpret_cast<const float4 *>(out_grad_page)[0];
+  //const float4 y_j = out_grad_f4[idx];
+  const float4 gamma_j = reinterpret_cast<const float4 *>(gamma_page)[0];
+  //const float4 gamma_j = gamma_f4[idx];
   const float4 dxhat = make_float4(
     y_j.x * gamma_j.x,
     y_j.y * gamma_j.y,
@@ -342,7 +361,8 @@ __global__ void ker_ln_bw_dinp_original(T *inp_grad, const T *out_grad, const T 
   );
 
   // Step 2
-  const float4 inp_j = inp_f4[idx];
+  const float4 inp_j = reinterpret_cast<const float4 *>(inp_page)[0];
+  //const float4 inp_j = inp_f4[idx];
   const float4 xhat = make_float4(
     (inp_j.x - mean) * rstd,
     (inp_j.y - mean) * rstd,
@@ -368,12 +388,14 @@ __global__ void ker_ln_bw_dinp_original(T *inp_grad, const T *out_grad, const T 
   float rm = __fdividef(1.0f, hidden_dim << 2);
   float sum_dxhat_m = sums[0] * rm;
   float sum_xhat_dxhat_m = sums[1] * rm;
-  inp_grad_f4[idx] = make_float4(
+  float4* inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad_page);
+  (*inp_grad_f4) = make_float4(
     (dxhat.x - sum_dxhat_m - xhat.x * sum_xhat_dxhat_m) * rstd,
     (dxhat.y - sum_dxhat_m - xhat.y * sum_xhat_dxhat_m) * rstd,
     (dxhat.z - sum_dxhat_m - xhat.z * sum_xhat_dxhat_m) * rstd,
     (dxhat.w - sum_dxhat_m - xhat.w * sum_xhat_dxhat_m) * rstd
   );
+  BlockStore(ts_store).Store( inp_grad + row_offset, inp_grad_page, ROW_SIZE );
   /// END ASSIGN4_2_2
 }
 /**
@@ -668,9 +690,12 @@ void launch_layernorm_bw(float *gamma_grad, float *betta_grad, float *inp_grad,
     throw std::runtime_error("hidden_dim % 4 != 0 || hidden_dim > 4096");
   }
   hidden_dim >>= 2;
-  //int nthread = min(((hidden_dim + 31) / 32) * 32, MAX_THREADS);
+  int nthread = min(((hidden_dim + 31) / 32) * 32, MAX_THREADS);
   dim3 batch_grid_dim((batch_size + TILE_DIM - 1) / TILE_DIM);
-  if (hidden_dim <= 128) {
+  if (1) {
+    ker_ln_bw_dinp_original<float><<<batch_size, nthread, 0, stream_2>>>(
+      d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
+  } else if (hidden_dim <= 128) {
     ker_ln_bw_dinp<float><<<batch_grid_dim, block_dim, 0, stream_2>>>(
       d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, batch_size, hidden_dim);
   } else if (hidden_dim <= 256) {
