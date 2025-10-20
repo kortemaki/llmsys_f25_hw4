@@ -45,22 +45,22 @@ def test_launch_layernorm_bw():
       gamma_mt = minitorch.tensor(gamma.clone().tolist(), backend=backend, requires_grad=True)
       beta_mt = minitorch.tensor(beta.clone().tolist(), backend=backend, requires_grad=True)
       out_mt = inp_mt.layernorm(gamma_mt, beta_mt)
-      out_grad_mt = minitorch.tensor(out_grad.clone().tolist(), backend=backend, requires_grad=True) 
+      out_grad_mt = minitorch.tensor(out_grad.clone().tolist(), backend=backend, requires_grad=True)
 
       start_time = time.time()
-      out_mt.backward(out_grad_mt)
+      inp_mt.grad, gamma_mt.grad, beta_mt.grad = minitorch.LayerNorm.backward(out_mt.history.ctx, out_grad_mt)
       end_time = time.time()
-      
+
       inp_grad = torch.tensor(inp_mt.grad.to_numpy(), dtype=torch.float32).cuda()
       gamma_grad = torch.tensor(gamma_mt.grad.to_numpy(), dtype=torch.float32).cuda()
       betta_grad = torch.tensor(beta_mt.grad.to_numpy(), dtype=torch.float32).cuda()
-        
+
       return [gamma_grad, betta_grad, inp_grad], end_time - start_time
 
     def baseline():
       f_input = minitorch.tensor(ln_input.clone().tolist(), backend=backend, requires_grad=True)
       f_gamma = minitorch.tensor(gamma.clone().tolist(), backend=backend, requires_grad=True)
-      f_out_grad = minitorch.tensor(out_grad.clone().tolist(), backend=backend, requires_grad=True) 
+      f_out_grad = minitorch.tensor(out_grad.clone().tolist(), backend=backend, requires_grad=True)
 
       start_time = time.time()
 
