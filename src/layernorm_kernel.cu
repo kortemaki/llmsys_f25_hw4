@@ -60,10 +60,10 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
     sums[1] = l_sums[1];
   }
   __syncthreads();
-  const float  mean_x = sums[0] / (hidden_size << 2);
-  const float mean_x2 = sums[1] / (hidden_size << 2);
+  const float  mean_x = __fdividef(sums[0], hidden_size << 2);
+  const float mean_x2 = __fdividef(sums[1], hidden_size << 2);
   const float variance = mean_x2 - mean_x * mean_x + LN_EPSILON;
-  const float sigma = sqrtf(variance);
+  const float rsigma = rsqrtf(variance);
 
   // Step 3
   if (threadIdx.x == 0) {
@@ -78,10 +78,10 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
     const float4 scale_i = scale_f4[idx];
     const float4 bias_i = bias_f4[idx];
     ln_res_f4[idx] = make_float4(
-      scale_i.x * (val.x - mean_x) / sigma + bias_i.x,
-      scale_i.y * (val.y - mean_x) / sigma + bias_i.y,
-      scale_i.z * (val.z - mean_x) / sigma + bias_i.z,
-      scale_i.w * (val.w - mean_x) / sigma + bias_i.w
+      scale_i.x * (val.x - mean_x) * rsigma + bias_i.x,
+      scale_i.y * (val.y - mean_x) * rsigma + bias_i.y,
+      scale_i.z * (val.z - mean_x) * rsigma + bias_i.z,
+      scale_i.w * (val.w - mean_x) * rsigma + bias_i.w
     );
   }
   /// END ASSIGN4_2_1
@@ -339,7 +339,7 @@ __global__ void ker_ln_bw_dinp_original(T *inp_grad, const T *out_grad, const T 
 
   // Step 4
   // perform only one divide here to avoid repeated divides below
-  float rm = 1.f / (float) (hidden_dim << 2);
+  float rm = __fdividef(1.0f, hidden_dim << 2);
   float sum_dxhat_m = sums[0] * rm;
   float sum_xhat_dxhat_m = sums[1] * rm;
   inp_grad_f4[idx] = make_float4(
@@ -350,7 +350,14 @@ __global__ void ker_ln_bw_dinp_original(T *inp_grad, const T *out_grad, const T 
   );
   /// END ASSIGN4_2_2
 }
-/* In these modified templates, I am using only one warp per row to avoid __syncthreads */
+/**
+In these modified templates, I am using only one warp per row to avoid __syncthreads
+
+@thread
+gridDim.x = (batch_size * seq_len + TILE_DIM - 1) / TILE_DIM
+blockDim.y = TILE_DIM
+blockDim.x = TILE_DIM
+*/
 template <typename T>
 __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
                                const T *gamma, const T *betta, const T *vars,
@@ -403,7 +410,7 @@ __global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
 
   // Step 4
   // perform only one divide here to avoid repeated divides below
-  float rm = 1.f / (float) (hidden_dim << 2);
+  float rm = __fdividef(1.0f, hidden_dim << 2);
   float sum_dxhat_m = __shfl_sync(WARP_REDUCE_MASK, l_sums[0], 0) * rm;
   float sum_xhat_dxhat_m = __shfl_sync(WARP_REDUCE_MASK, l_sums[1], 0) * rm;
   inp_grad_f4[idx] = make_float4(
@@ -494,7 +501,7 @@ __global__ void ker_ln_bw_dinp_gt128(T *inp_grad, const T *out_grad, const T *in
 
   // Step 4
   // perform only one divide here to avoid repeated divides below
-  float rm = 1.f / (float) (hidden_dim << 2);
+  float rm = __fdividef(1.0f, hidden_dim << 2);
   float sum_dxhat_m = __shfl_sync(WARP_REDUCE_MASK, l_sums[0], 0) * rm;
   float sum_xhat_dxhat_m = __shfl_sync(WARP_REDUCE_MASK, l_sums[1], 0) * rm;
   i = idx;
@@ -542,7 +549,6 @@ __global__ void ker_ln_bw_dinp_gt512(T *inp_grad, const T *out_grad, const T *in
 
   const uint idx = threadIdx.x;
   float l_sums[2] = {0};
-  __shared__ float sums[2];
   uint k = 0;
   for (uint i = idx; i < hidden_dim; i += blockDim.x) {
     // Step 1
@@ -574,7 +580,7 @@ __global__ void ker_ln_bw_dinp_gt512(T *inp_grad, const T *out_grad, const T *in
 
   // Step 4
   // perform only one divide here to avoid repeated divides below
-  float rm = 1.f / (float) (hidden_dim << 2);
+  float rm = __fdividef(1.0f, hidden_dim << 2);
   float sum_dxhat_m = __shfl_sync(WARP_REDUCE_MASK, l_sums[0], 0) * rm;
   float sum_xhat_dxhat_m = __shfl_sync(WARP_REDUCE_MASK, l_sums[1], 0) * rm;
   k = 0;
