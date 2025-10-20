@@ -2,6 +2,9 @@
 #include "includes/kernels.h"
 #include "includes/cuda_util.h"
 
+#include <cub/block/block_load.cuh>
+#include <cub/cub.cuh>
+
 #include <cooperative_groups.h>
 #include <cstddef>
 
@@ -42,13 +45,30 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
   // 1. Compute x and x^2 with reinterpret_cast by casting to float4 for speedup
   // 2. Compute reduce sum with blockReduce and add epsilon with LN_EPSILON
   // 3. Compute layernorm result with reinterpret_cast by casting to float4 for speedup
+  /* I decided to use a burst access to get and write the row using shared memory. */
+  const uint ROW_SIZE = (hidden_size << 2);
+  T row_page[4];
+  T scale_page[4];
+  T bias_page[4];
+  T ln_res_page[4];
+  typedef cub::BlockLoad<T, MAX_THREADS, 4, cub::BLOCK_LOAD_VECTORIZE>
+      BlockLoad;
+  __shared__ typename BlockLoad::TempStorage ts_load;
+  typedef cub::BlockStore<T, MAX_THREADS, 4, cub::BLOCK_STORE_VECTORIZE>
+      BlockStore;
+  __shared__ typename BlockStore::TempStorage ts_store;
 
   // Step 1
   float l_sums[2] = {0};
   __shared__ float sums[2];
-  const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + blockIdx.x * hidden_size;
-  for (uint idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
-    const float4  val = inp_f4[idx];
+
+  uint row_offset = blockIdx.x * ROW_SIZE;
+  uint row_x = threadIdx.x;
+  for (uint page_offset = 0; page_offset < hidden_size; page_offset += blockDim.x) {
+    if (page_offset + row_x >= hidden_size) break;
+    uint n_els = min(hidden_size - page_offset, MAX_THREADS) << 2;
+    BlockLoad(ts_load).Load( inp + row_offset + page_offset, row_page, n_els );
+    float4 val = reinterpret_cast<float4 *>( row_page )[0];
     l_sums[0] += val.x + val.y + val.z + val.w;
     l_sums[1] += val.x * val.x + val.y * val.y + val.z * val.z + val.w * val.w;
   }
@@ -60,29 +80,37 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
     sums[1] = l_sums[1];
   }
   __syncthreads();
-  const float  mean_x = __fdividef(sums[0], hidden_size << 2);
-  const float mean_x2 = __fdividef(sums[1], hidden_size << 2);
+  const float   mean_x = __fdividef(sums[0], ROW_SIZE);
+  const float  mean_x2 = __fdividef(sums[1], ROW_SIZE);
   const float variance = mean_x2 - mean_x * mean_x + LN_EPSILON;
-  const float rsigma = rsqrtf(variance);
+  const float   rsigma = rsqrtf(variance);
 
   // Step 3
   if (threadIdx.x == 0) {
     if (means) means[blockIdx.x] = mean_x;
     vars[blockIdx.x] = variance;
   }
-  float4 *ln_res_f4 = reinterpret_cast<float4 *>(ln_res) + blockIdx.x * hidden_size;
-  const float4 *scale_f4 = reinterpret_cast<const float4 *>(scale);
-  const float4  *bias_f4 = reinterpret_cast<const float4 *>( bias);
-  for (uint idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
-    const float4 val = inp_f4[idx];
-    const float4 scale_i = scale_f4[idx];
-    const float4 bias_i = bias_f4[idx];
-    ln_res_f4[idx] = make_float4(
+  float4 val;
+  float4 scale_i;
+  float4 bias_i;
+  float4 *ln_res_i_f4 = reinterpret_cast<float4 *>(ln_res_page);
+  row_x = threadIdx.x;
+  for (uint page_offset = 0; page_offset < hidden_size; page_offset += blockDim.x) {
+    if (page_offset + row_x >= hidden_size) return;
+    uint n_els = min(hidden_size - page_offset, MAX_THREADS) << 2;
+    BlockLoad(ts_load).Load( inp + row_offset + page_offset, row_page, n_els );
+    BlockLoad(ts_load).Load( scale + page_offset, scale_page, n_els );
+    BlockLoad(ts_load).Load( bias  + page_offset, bias_page,  n_els );
+    val     = reinterpret_cast<float4 *>( row_page   )[0];
+    scale_i = reinterpret_cast<float4 *>( scale_page )[0];
+    bias_i  = reinterpret_cast<float4 *>( bias_page  )[0];
+    (*ln_res_i_f4)  = make_float4(
       scale_i.x * (val.x - mean_x) * rsigma + bias_i.x,
       scale_i.y * (val.y - mean_x) * rsigma + bias_i.y,
       scale_i.z * (val.z - mean_x) * rsigma + bias_i.z,
       scale_i.w * (val.w - mean_x) * rsigma + bias_i.w
     );
+    BlockStore(ts_store).Store( ln_res + row_offset + page_offset, ln_res_page, n_els );
   }
   /// END ASSIGN4_2_1
 }
