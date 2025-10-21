@@ -389,7 +389,8 @@ class CudaKernelOps(TensorOps):
         ctypes.c_void_p
       ]
       lib_softmax.launch_attn_softmax.restype = None
-
+      inp_sum=inp._tensor._storage.sum()
+      print(f"launching attn_softmax with {inp_sum=} {mask is None=} {inp.shape} {training=}")
       lib_softmax.launch_attn_softmax(
         inp._tensor._storage,
         mask._tensor._storage,
@@ -400,6 +401,8 @@ class CudaKernelOps(TensorOps):
         is_dec_self_attn,
         stream
       )
+      out_sum = inp._tensor._storage.sum()
+      print(f"return {out_sum=}")
 
       return inp
 
@@ -417,7 +420,9 @@ class CudaKernelOps(TensorOps):
         ctypes.c_void_p,
       ]
       lib_softmax.launch_attn_softmax_bw.restype = None
-
+      dout_sum = out_grad._tensor._storage.sum()
+      inp_sum = soft_inp._tensor._storage.sum()
+      print(f"launching attn_softmax_bw with {dout_sum=} {inp_sum=}")
       lib_softmax.launch_attn_softmax_bw(
         out_grad._tensor._storage,
         soft_inp._tensor._storage,
@@ -425,7 +430,8 @@ class CudaKernelOps(TensorOps):
         to_len,
         stream,
       )
-
+      out_sum = out_grad._tensor._storage.sum()
+      print(f"return {out_sum=}")
       return out_grad
       #   END ASSIGN4_1_2
 
@@ -450,7 +456,10 @@ class CudaKernelOps(TensorOps):
       ln_res = inp.zeros()
       vars = inp.zeros((batch_size_by_seq_len,))
       means = inp.zeros((batch_size_by_seq_len,))
-
+      inp_sum = inp._tensor._storage.sum()
+      gam_sum = gamma._tensor._storage.sum()
+      bet_sum = beta._tensor._storage.sum()
+      print(f"launching layernorm with {inp_sum=} {gam_sum=} {bet_sum=}")
       lib_layernorm.launch_layernorm(
           ln_res._tensor._storage,
           vars._tensor._storage,
@@ -462,7 +471,10 @@ class CudaKernelOps(TensorOps):
           hidden_dim,
           stream,
       )
-
+      ln_sum = ln_res._tensor._storage.sum()
+      var_sum = vars._tensor._storage.sum()
+      mean_sum = means._tensor._storage.sum()
+      print(f"return {ln_sum=} {var_sum=} {mean_sum=}")
       return ln_res, vars, means
       #   END ASSIGN4_2_1
 
@@ -491,7 +503,12 @@ class CudaKernelOps(TensorOps):
       inp_grad = out_grad.zeros()
       gamma_grad = gamma.zeros()
       beta_grad = beta.zeros()
-
+      dout_sum = out_grad._tensor._storage.sum()
+      inp_sum = inp._tensor._storage.sum()
+      gam_sum = gamma._tensor._storage.sum()
+      var_sum = var._tensor._storage.sum()
+      mean_sum = mean._tensor._storage.sum()
+      print(f"launching layernorm_bw with {dout_sum=} {inp_sum=} {gam_sum=} {var_sum=} {mean_sum=}")
       lib_layernorm.launch_layernorm_bw(
           gamma_grad._tensor._storage,
           beta_grad._tensor._storage,
@@ -507,6 +524,9 @@ class CudaKernelOps(TensorOps):
           stream,
           stream,
       )
-
+      dinp_sum = inp_grad._tensor._storage.sum()
+      dgam_sum = gamma_grad._tensor._storage.sum()
+      dbet_sum = beta_grad._tensor._storage.sum()
+      print(f"return {dinp_sum=} {dgam_sum=} {dbet_sum=}")
       return inp_grad, gamma_grad, beta_grad
       #   END ASSIGN4_2_2
