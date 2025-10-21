@@ -86,7 +86,7 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
   __syncthreads();
   const float   mean_x = __fdividef(sums[0], ROW_SIZE);
   const float  mean_x2 = __fdividef(sums[1], ROW_SIZE);
-  const float variance = mean_x2 - mean_x * mean_x + LN_EPSILON;
+  const float variance = max(mean_x2 - mean_x * mean_x, 0.f) + LN_EPSILON;
   const float   rsigma = rsqrtf(variance);
 
   // Step 3
