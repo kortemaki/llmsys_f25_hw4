@@ -8,3 +8,6 @@ streamlit
 streamlit-ace
 torch
 watchdog
+fire
+sacrebleu
+wrapt
