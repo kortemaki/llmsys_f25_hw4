@@ -239,7 +239,11 @@ void launch_attn_softmax(float *inp, const float *attn_mask,
   cudaMalloc((void **)&d_attn_mask, attn_mask_size);
 
   cudaMemcpy(d_inp, inp, inp_size, cudaMemcpyHostToDevice);
-  cudaMemcpy(d_attn_mask, attn_mask, attn_mask_size, cudaMemcpyHostToDevice);
+  if (mask_future) {
+    d_attn_mask = nullptr;
+  } else if (attn_mask != nullptr) {
+    cudaMemcpy(d_attn_mask, attn_mask, attn_mask_size, cudaMemcpyHostToDevice);
+  }
 
   dim3 grid_dim(1, batch_size, nhead);
   if (to_len <= 32) {
