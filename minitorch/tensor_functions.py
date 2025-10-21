@@ -388,7 +388,7 @@ class Attn_Softmax(Function):
       inp = inp.contiguous()
       maks = mask.contiguous()
       ctx.save_for_backward(inp)
-      return inp.backend.attn_softmax_fw(inp, mask, inp.requires_grad())
+      return inp.backend.attn_softmax_fw(inp, mask)
       #   END ASSIGN4_1_1
 
     @staticmethod
