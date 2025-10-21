@@ -180,8 +180,11 @@ class Tanh(Function):
             output : Tensor
                 Tensor containing the element-wise tanh of a.
         """
-        # COPY FROM ASSIGN3
-        raise NotImplementedError
+        ### BEGIN YOUR SOLUTION
+        out = a.f.tanh_map(a)
+        ctx.save_for_backward(out)
+        return out
+        ### END YOUR SOLUTION
 
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> Tensor:
@@ -199,8 +202,10 @@ class Tanh(Function):
             output : Tensor
                 gradient_for_a must be the correct element-wise gradient for tanh.
         """
-        # COPY FROM ASSIGN3
-        raise NotImplementedError
+        ### BEGIN YOUR SOLUTION
+        out = ctx.saved_values[0]
+        return grad_output * (-(out ** 2) + 1)
+        ### END YOUR SOLUTION
 
 
 class Sigmoid(Function):
