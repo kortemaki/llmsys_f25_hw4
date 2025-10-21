@@ -391,7 +391,7 @@ class CudaKernelOps(TensorOps):
       ]
       lib_softmax.launch_attn_softmax.restype = None
       inp_sum=inp._tensor._storage.sum()
-      print(f"launching attn_softmax with {inp_sum=} {(mask is None) or mask.shape=} {inp.shape} {is_dec_self_attn=}")
+      #print(f"launching attn_softmax with {inp_sum=} {(mask is None) or mask.shape=} {inp.shape} {is_dec_self_attn=}")
       lib_softmax.launch_attn_softmax(
         inp._tensor._storage,
         mask._tensor._storage,
@@ -423,7 +423,7 @@ class CudaKernelOps(TensorOps):
       lib_softmax.launch_attn_softmax_bw.restype = None
       dout_sum = out_grad._tensor._storage.sum()
       inp_sum = soft_inp._tensor._storage.sum()
-      print(f"launching attn_softmax_bw with {dout_sum=} {inp_sum=}")
+      #print(f"launching attn_softmax_bw with {dout_sum=} {inp_sum=}")
       lib_softmax.launch_attn_softmax_bw(
         out_grad._tensor._storage,
         soft_inp._tensor._storage,
