@@ -300,33 +300,32 @@ blockDim.y = warps_per_block
 grad: [batch_size, nhead, seq_len, seq_len], output grad.
 output: [batch_size, nhead, seq_len, seq_len], output of softmax forward.
 */
-template <typename T, int ITERATIONS>
+template <typename T, int ITERATIONS, int PAGE_SIZE>
 __global__ void ker_attn_softmax_bw(T *grad, const T *inp, int softmax_length) {
 
   int batch_idx = blockIdx.x * blockDim.y + threadIdx.y;
-  int offset = batch_idx * softmax_length + threadIdx.x;
+  uint offset = batch_idx * softmax_length;
 
   grad += offset;
   inp += offset;
 
-  T grad_reg[ITERATIONS];
-  T inp_reg[ITERATIONS];
+  T grad_reg[ITERATIONS * PAGE_SIZE];
+  T inp_reg[ITERATIONS * PAGE_SIZE];
   float warp_sum = 0.0;
 
-  const uint PAGE_SIZE = 1;
   T grad_page[PAGE_SIZE];
   T inp_page[PAGE_SIZE];
-  typedef cub::WarpLoad<T, WARP_SIZE, PAGE_SIZE, cub::WARP_LOAD_VECTORIZE>
+  typedef cub::WarpLoad<T, PAGE_SIZE, cub::WARP_LOAD_VECTORIZE>
       WarpLoad;
   __shared__ typename WarpLoad::TempStorage ts_load;
-  typedef cub::WarpStore<T, WARP_SIZE, PAGE_SIZE, cub::WARP_STORE_VECTORIZE>
+  typedef cub::WarpStore<T, PAGE_SIZE, cub::WARP_STORE_VECTORIZE>
       WarpStore;
   __shared__ typename WarpStore::TempStorage ts_store;
 
-  uint offset = 0; // index into the current row for the start of the current load
+  offset = 0; // index into the current row for the start of the current load
   const uint thread_offset = threadIdx.x * PAGE_SIZE; // index of this thread's page within the current load
   #pragma unroll
-  for (int i = 0; i < (ITERATIONS + PAGE_SIZE - 1) / PAGE_SIZE; ++i) {
+  for (int i = 0; i < ITERATIONS; ++i) {
     WarpLoad(ts_load).Load( grad + offset, grad_page, softmax_length - offset );
     WarpLoad(ts_load).Load( inp + offset, inp_page, softmax_length - offset );
     #pragma unroll
@@ -335,7 +334,7 @@ __global__ void ker_attn_softmax_bw(T *grad, const T *inp, int softmax_length) {
       if (curr_idx < softmax_length) {
         grad_reg[i * PAGE_SIZE + j] = grad_page[j];
         inp_reg[i * PAGE_SIZE + j] = inp_page[j];
-        warp_sum += (float)grad_reg[i] * (float)inp_reg[i];
+        warp_sum += (float)grad_page[j] * (float)inp_page[j];
       }
     }
     offset += PAGE_SIZE * WARP_SIZE;
@@ -349,16 +348,16 @@ __global__ void ker_attn_softmax_bw(T *grad, const T *inp, int softmax_length) {
 
   offset = 0;
   #pragma unroll
-  for (int i = 0; i < (ITERATIONS + PAGE_SIZE - 1) / PAGE_SIZE; ++i) {
+  for (int i = 0; i < ITERATIONS; ++i) {
     #pragma unroll
     for (int j = 0; j < PAGE_SIZE; ++j) {
       int curr_idx = offset + thread_offset + j;
       if (curr_idx < softmax_length) {
         grad_page[j] = (T)((float)inp_reg[i * PAGE_SIZE + j] * ((float)grad_reg[i * PAGE_SIZE + j] - warp_sum));
-        //printf("grad for position %d %d %f\n", batch_idx, curr_idx, grad[i * WARP_SIZE]);
       }
     }
     WarpStore(ts_store).Store( grad + offset, grad_page, softmax_length - offset );
+    offset += PAGE_SIZE * WARP_SIZE;
   }
 }
 
@@ -388,23 +387,23 @@ void launch_attn_softmax_bw(float *out_grad,
   // Launch kernel
   // Hint: use ker_attn_softmax_bw<float, ITERATIONS> depending on softmax_len
   if (softmax_len <= 32) {
-    ker_attn_softmax_bw<float, 1><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
+    ker_attn_softmax_bw<float, 1, 1><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 64) {
-    ker_attn_softmax_bw<float, 2><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
+    ker_attn_softmax_bw<float, 1, 2><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 128) {
-    ker_attn_softmax_bw<float, 4><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
+    ker_attn_softmax_bw<float, 1, 4><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 256) {
-    ker_attn_softmax_bw<float, 8><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
+    ker_attn_softmax_bw<float, 1, 8><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 384) {
-    ker_attn_softmax_bw<float, 12><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
+    ker_attn_softmax_bw<float, 3, 4><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 512) {
-    ker_attn_softmax_bw<float, 16><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
+    ker_attn_softmax_bw<float, 2, 8><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 768) {
-    ker_attn_softmax_bw<float, 24><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
+    ker_attn_softmax_bw<float, 3, 8><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 1024) {
-    ker_attn_softmax_bw<float, 32><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
+    ker_attn_softmax_bw<float, 2, 16><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else if (softmax_len <= 2048) {
-    ker_attn_softmax_bw<float, 64><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
+    ker_attn_softmax_bw<float, 4, 16><<<grid_dim, block_dim, 0, stream>>>(d_grad, d_inp, softmax_len);
   } else {
     throw std::runtime_error(
         "Sequence length greater than 2048 is currently not supported");
