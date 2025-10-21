@@ -127,7 +127,7 @@ class MultiHeadAttention(Module):
         if self.causal:
             attention += self.create_causal_mask(seq_len)
         return (
-            (softmax(attention, dim=3) @ v)
+            (attention.attn_softmax(self.create_causal_mask(seq_len) if self.causal else attention.zeros()) @ v)
             .permute(0, 2, 1, 3)
             .contiguous()
             .view(batch_size, seq_len, self.n_embd)

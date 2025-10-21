@@ -162,8 +162,11 @@ class LayerNorm1d(Module):
             output - Tensor of shape (bs, dim)
         """
         batch, dim = x.shape
+        return x.layernorm(self.weights.value, self.bias.value)
+        """
         ### BEGIN ASSIGN3_2
         difs = x - x.mean(1)
         var = x.var(1) + self.eps
         return (difs / (var ** 0.5)) * self.weights.value + self.bias.value
         ### END ASSIGN3_2
+        """
