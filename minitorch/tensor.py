@@ -192,8 +192,8 @@ class Tensor:
 
     def __rmul__(self, b: TensorLike) -> Tensor:
         return self * b
-    
-    def __pow__(self, b: TensorLike) -> Tensor: 
+
+    def __pow__(self, b: TensorLike) -> Tensor:
         if isinstance(b, (int, float)):
             return PowerScalar.apply(self, self._ensure_tensor(b))
         elif len(b.shape) == 1:
@@ -221,7 +221,7 @@ class Tensor:
 
     def exp(self) -> Tensor:
         return Exp.apply(self)
-    
+
     def tanh(self) -> Tensor:
         return Tanh.apply(self)
 
@@ -243,28 +243,28 @@ class Tensor:
             return self.sum(dim) / self.shape[dim]
         else:
             return self.sum() / self.size
-    
+
     def var(self, dim: Optional[int] = None) -> Tensor:
         "Compute the variance over dimension `dim`"
         if dim is not None:
             shape = self.shape
-            
+
             mean = self.sum(dim) / self.shape[dim]
             # You don't need to view again because it'll be the correct shape for broadcasting
             mean = mean.contiguous()
-            
+
             diff = self.__sub__(mean) ** 2
             diff = diff.sum(dim) / self.shape[dim]
-            
+
             return diff
         else:
             shape = self.shape
             mean = self.sum() / self.size
             mean = mean.contiguous().view(shape)
-            
+
             diff = self.__sub__(mean) ** 2
             diff = diff.sum() / self.size
-            
+
             return diff
 
     def permute(self, *order: int) -> Tensor:

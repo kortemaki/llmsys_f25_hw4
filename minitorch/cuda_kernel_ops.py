@@ -373,9 +373,9 @@ class CudaKernelOps(TensorOps):
         return out
 
     @staticmethod
-    def attn_softmax_fw(inp: Tensor, mask: Tensor):
+    def attn_softmax_fw(inp: Tensor, mask: Tensor, training: bool = False):
       batch_size, nhead, from_len, to_len = inp.shape
-      is_dec_self_attn = False
+      is_dec_self_attn = training
       stream = torch.cuda.current_stream().cuda_stream
 
       lib_softmax.launch_attn_softmax.argtypes = [

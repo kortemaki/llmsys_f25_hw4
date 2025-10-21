@@ -124,8 +124,8 @@ class MultiHeadAttention(Module):
 
         ### BEGIN ASSIGN3_3
         attention = (q @ kT) / tensor([math.sqrt(k_dim)], backend=q.backend)
-        if self.causal:
-            attention += self.create_causal_mask(seq_len)
+        #if self.causal:
+        #    attention += self.create_causal_mask(seq_len)
         return (
             (attention.attn_softmax(self.create_causal_mask(seq_len) if self.causal else attention.zeros()) @ v)
             .permute(0, 2, 1, 3)
