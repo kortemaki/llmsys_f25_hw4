@@ -548,6 +548,8 @@ def tensor_from_numpy(
     if ls.dtype != datatype:
         ls = ls.astype(datatype)
 
+    ls = np.ascontiguousarray(ls)
+
     res =  minitorch.Tensor(
         v = minitorch.TensorData(
             ls.flatten(), # Will create a COPY of the numpy array
