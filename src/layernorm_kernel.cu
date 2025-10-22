@@ -25,8 +25,8 @@ It will not only output the layer norm result,
 
 @thread
 gridDim.x = batch_size * seq_len / 32
-blockDim.x = TILE_DIM
-blockDim.y = TILE_DIM
+blockDim.x = MAX_THREADS
+blockDim.y = 1
 
 @param
 ln_res: [batch_size * seq_len, hidden_size], ln result.
@@ -66,6 +66,7 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
 
   // Step 1
   float l_sums[2] = {0};
+  double l_sum1 = 0.0;  // use double here to reduce underflow
   __shared__ float sums[2];
   uint row_offset = idx_y * ROW_SIZE;
   uint row_x = threadIdx.x;
@@ -74,8 +75,9 @@ __global__ void ker_layer_norm(T *ln_res, T *vars, T *means, const T *inp,
     if (row_x + i >= hidden_size) break;
     float4 val = reinterpret_cast<float4 *>( row_page )[i];
     l_sums[0] += val.x + val.y + val.z + val.w;
-    l_sums[1] += val.x * val.x + val.y * val.y + val.z * val.z + val.w * val.w;
+    l_sum1 += val.x * val.x + val.y * val.y + val.z * val.z + val.w * val.w;
   }
+  l_sums[1] = l_sum1;
 
   // Step 2
   blockReduce<ReduceType::kSum, 2>(l_sums);
@@ -149,8 +151,7 @@ void launch_layernorm(float *ln_res, float *vars, float *means,
 
   // For using float4
   hidden_dim >>= 2;
-  int nbatch = min(((batch_size + TILE_DIM - 1) / TILE_DIM) * TILE_DIM, MAX_THREADS);
-  dim3 grid_dim(nbatch);
+  dim3 grid_dim(batch_size);
   dim3 block_dim(MAX_THREADS, 1);
   ker_layer_norm<float><<<grid_dim, block_dim, 0, stream>>>(
     d_ln_res, d_vars, d_means, d_inp, d_scale, d_bias, batch_size, hidden_dim);
@@ -305,7 +306,7 @@ means: [batch_size * seq_len], mean of ln forward,
   used to compute xhat, maybe nullptr
 */
 template <typename T>
-__global__ void ker_ln_bw_dinp_original(T *inp_grad, const T *out_grad, const T *inp,
+__global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
                                const T *gamma, const T *betta, const T *vars,
                                const T *means, int hidden_dim) {
 
@@ -345,14 +346,11 @@ __global__ void ker_ln_bw_dinp_original(T *inp_grad, const T *out_grad, const T 
   BlockLoad(ts_load).Load( out_grad + row_offset, out_grad_page, ROW_SIZE );
   BlockLoad(ts_load).Load( gamma, gamma_page, ROW_SIZE );
 
-  //const uint idx = threadIdx.x;
   float l_sums[2];
   __shared__ float sums[2];
 
   const float4 y_j = reinterpret_cast<const float4 *>(out_grad_page)[0];
-  //const float4 y_j = out_grad_f4[idx];
   const float4 gamma_j = reinterpret_cast<const float4 *>(gamma_page)[0];
-  //const float4 gamma_j = gamma_f4[idx];
   const float4 dxhat = make_float4(
     y_j.x * gamma_j.x,
     y_j.y * gamma_j.y,
@@ -362,7 +360,6 @@ __global__ void ker_ln_bw_dinp_original(T *inp_grad, const T *out_grad, const T 
 
   // Step 2
   const float4 inp_j = reinterpret_cast<const float4 *>(inp_page)[0];
-  //const float4 inp_j = inp_f4[idx];
   const float4 xhat = make_float4(
     (inp_j.x - mean) * rstd,
     (inp_j.y - mean) * rstd,
@@ -378,10 +375,8 @@ __global__ void ker_ln_bw_dinp_original(T *inp_grad, const T *out_grad, const T 
   if (!threadIdx.x) {
     sums[0] = l_sums[0];
     sums[1] = l_sums[1];
-    //printf("sums row %d: dxhat %f xhat_dxhat %f\n", blockIdx.x, sums[0], sums[1]);
   }
   __syncthreads();
-  //printf("thread %d %d xhat [%f, %f, %f, %f] dxhat [%f, %f, %f, %f]\n", blockIdx.x, threadIdx.x, xhat.x, xhat.y, xhat.z, xhat.w, dxhat.x, dxhat.y, dxhat.z, dxhat.w);
 
   // Step 4
   // perform only one divide here to avoid repeated divides below
@@ -396,253 +391,6 @@ __global__ void ker_ln_bw_dinp_original(T *inp_grad, const T *out_grad, const T 
     (dxhat.w - sum_dxhat_m - xhat.w * sum_xhat_dxhat_m) * rstd
   );
   BlockStore(ts_store).Store( inp_grad + row_offset, inp_grad_page, ROW_SIZE );
-  /// END ASSIGN4_2_2
-}
-/**
-In these modified templates, I am using only one warp per row to avoid __syncthreads
-
-@thread
-gridDim.x = (batch_size * seq_len + TILE_DIM - 1) / TILE_DIM
-blockDim.y = TILE_DIM
-blockDim.x = TILE_DIM
-*/
-template <typename T>
-__global__ void ker_ln_bw_dinp(T *inp_grad, const T *out_grad, const T *inp,
-                               const T *gamma, const T *betta, const T *vars,
-                               const T *means, int rows, int hidden_dim) {
-
-  /// BEGIN ASSIGN4_2_2
-  /// TODO
-  // Hints:
-  // 1. Compute dxhat=dy*w with reinterpret_cast by casting to float4 for speedup
-  // 2. Compute xhat with reinterpret_cast by casting to float4 for speedup
-  // 3. Compute reduce sum for dxhat and dxhat*xhat with blockReduce
-  // 4. Compute final gradient
-
-
-  const uint idx_y = blockIdx.x * blockDim.y + threadIdx.y;
-  if (threadIdx.x >= hidden_dim || idx_y >= rows) return;
-  const uint offset = idx_y * hidden_dim;
-  const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + offset;
-  const T mean = means[idx_y];
-  const T rstd = rsqrt(vars[idx_y] + LN_EPSILON);
-  const float4 *out_grad_f4 = reinterpret_cast<const float4 *>(out_grad) + offset;
-  const float4 *gamma_f4 = reinterpret_cast<const float4 *>(gamma);
-  float4 *inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad) + offset;
-
-  const uint idx = threadIdx.x;
-  float l_sums[2];
-
-  const float4 y_j = out_grad_f4[idx];
-  const float4 gamma_j = gamma_f4[idx];
-  const float4 dxhat = make_float4(
-    y_j.x * gamma_j.x,
-    y_j.y * gamma_j.y,
-    y_j.z * gamma_j.z,
-    y_j.w * gamma_j.w
-  );
-
-  // Step 2
-  const float4 inp_j = inp_f4[idx];
-  const float4 xhat = make_float4(
-    (inp_j.x - mean) * rstd,
-    (inp_j.y - mean) * rstd,
-    (inp_j.z - mean) * rstd,
-    (inp_j.w - mean) * rstd
-  );
-
-  // Step 3
-  l_sums[0] = dxhat.x + dxhat.y + dxhat.z + dxhat.w;
-  l_sums[1] = xhat.x * dxhat.x + xhat.y * dxhat.y + xhat.z * dxhat.z + xhat.w * dxhat.w;
-  warpReduce<ReduceType::kSum, 2>(l_sums);
-
-  // Step 4
-  // perform only one divide here to avoid repeated divides below
-  float rm = __fdividef(1.0f, hidden_dim << 2);
-  float sum_dxhat_m = __shfl_sync(WARP_REDUCE_MASK, l_sums[0], 0) * rm;
-  float sum_xhat_dxhat_m = __shfl_sync(WARP_REDUCE_MASK, l_sums[1], 0) * rm;
-  inp_grad_f4[idx] = make_float4(
-    (dxhat.x - sum_dxhat_m - xhat.x * sum_xhat_dxhat_m) * rstd,
-    (dxhat.y - sum_dxhat_m - xhat.y * sum_xhat_dxhat_m) * rstd,
-    (dxhat.z - sum_dxhat_m - xhat.z * sum_xhat_dxhat_m) * rstd,
-    (dxhat.w - sum_dxhat_m - xhat.w * sum_xhat_dxhat_m) * rstd
-  );
-  /// END ASSIGN4_2_2
-}
-// WARNING: because of the way the loops below have been unrolled, this needs to be launched with the exact iteration count.
-template <typename T, int ITERATIONS>
-__global__ void ker_ln_bw_dinp_gt128(T *inp_grad, const T *out_grad, const T *inp,
-                               const T *gamma, const T *betta, const T *vars,
-                               const T *means, int rows, int hidden_dim) {
-  // Here we will allocate dynamic memory for xhat and dxhat on the stack
-  // The stack is fairly generous but it is limited, so we probably wouldn't want to use this kernel with iterations > 1000 or so
-  float4 xhat[ITERATIONS];
-  float4 dxhat[ITERATIONS];
-
-  const uint idx_y = blockIdx.x * blockDim.y + threadIdx.y;
-  if (idx_y >= rows) return;
-  const uint offset = idx_y * hidden_dim;
-  const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + offset;
-  const T mean = means[idx_y];
-  const T rstd = rsqrt(vars[idx_y] + LN_EPSILON);
-  const float4 *out_grad_f4 = reinterpret_cast<const float4 *>(out_grad) + offset;
-  const float4 *gamma_f4 = reinterpret_cast<const float4 *>(gamma);
-  float4 *inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad) + offset;
-
-  const uint idx = threadIdx.x;
-  float l_sums[2] = {0};
-  uint i = idx;
-  uint k = 0;
-  #pragma unroll
-  for (; k < ITERATIONS - 1; k++) {
-    // Step 1
-    const float4 y_j = out_grad_f4[i];
-    const float4 gamma_j = gamma_f4[i];
-    dxhat[k] = make_float4(
-      y_j.x * gamma_j.x,
-      y_j.y * gamma_j.y,
-      y_j.z * gamma_j.z,
-      y_j.w * gamma_j.w
-    );
-
-    // Step 2
-    const float4 inp_j = inp_f4[i];
-    xhat[k] = make_float4(
-      (inp_j.x - mean) * rstd,
-      (inp_j.y - mean) * rstd,
-      (inp_j.z - mean) * rstd,
-      (inp_j.w - mean) * rstd
-    );
-
-    // Step 3
-    l_sums[0] += dxhat[k].x + dxhat[k].y + dxhat[k].z + dxhat[k].w;
-    l_sums[1] += xhat[k].x * dxhat[k].x + xhat[k].y * dxhat[k].y + xhat[k].z * dxhat[k].z + xhat[k].w * dxhat[k].w;
-    i += blockDim.x;
-  }
-  // manually unroll the last iteration to avoid a branch in the loop
-  if (i < hidden_dim) {
-    // Step 1
-    const float4 y_j = out_grad_f4[i];
-    const float4 gamma_j = gamma_f4[i];
-    dxhat[k] = make_float4(
-      y_j.x * gamma_j.x,
-      y_j.y * gamma_j.y,
-      y_j.z * gamma_j.z,
-      y_j.w * gamma_j.w
-    );
-
-    // Step 2
-    const float4 inp_j = inp_f4[i];
-    xhat[k] = make_float4(
-      (inp_j.x - mean) * rstd,
-      (inp_j.y - mean) * rstd,
-      (inp_j.z - mean) * rstd,
-      (inp_j.w - mean) * rstd
-    );
-
-    // Step 3
-    l_sums[0] += dxhat[k].x + dxhat[k].y + dxhat[k].z + dxhat[k].w;
-    l_sums[1] += xhat[k].x * dxhat[k].x + xhat[k].y * dxhat[k].y + xhat[k].z * dxhat[k].z + xhat[k].w * dxhat[k].w;
-  }
-
-  warpReduce<ReduceType::kSum, 2>(l_sums);
-
-  // Step 4
-  // perform only one divide here to avoid repeated divides below
-  float rm = __fdividef(1.0f, hidden_dim << 2);
-  float sum_dxhat_m = __shfl_sync(WARP_REDUCE_MASK, l_sums[0], 0) * rm;
-  float sum_xhat_dxhat_m = __shfl_sync(WARP_REDUCE_MASK, l_sums[1], 0) * rm;
-  i = idx;
-  k = 0;
-  #pragma unroll
-  for (; k < ITERATIONS - 1; k++) {
-    inp_grad_f4[i] = make_float4(
-      (dxhat[k].x - sum_dxhat_m - xhat[k].x * sum_xhat_dxhat_m) * rstd,
-      (dxhat[k].y - sum_dxhat_m - xhat[k].y * sum_xhat_dxhat_m) * rstd,
-      (dxhat[k].z - sum_dxhat_m - xhat[k].z * sum_xhat_dxhat_m) * rstd,
-      (dxhat[k].w - sum_dxhat_m - xhat[k].w * sum_xhat_dxhat_m) * rstd
-    );
-    i += blockDim.x;
-  }
-  // manually unroll the last loop because of early returns
-  if (i >= hidden_dim) return;
-  inp_grad_f4[i] = make_float4(
-    (dxhat[k].x - sum_dxhat_m - xhat[k].x * sum_xhat_dxhat_m) * rstd,
-    (dxhat[k].y - sum_dxhat_m - xhat[k].y * sum_xhat_dxhat_m) * rstd,
-    (dxhat[k].z - sum_dxhat_m - xhat[k].z * sum_xhat_dxhat_m) * rstd,
-    (dxhat[k].w - sum_dxhat_m - xhat[k].w * sum_xhat_dxhat_m) * rstd
-  );
-  /// END ASSIGN4_2_2
-}
-/* This is a more flexible implementation that has more branches */
-template <typename T>
-__global__ void ker_ln_bw_dinp_gt512(T *inp_grad, const T *out_grad, const T *inp,
-                               const T *gamma, const T *betta, const T *vars,
-                               const T *means, int rows, int hidden_dim) {
-  // Here we will allocate dynamic memory for xhat and dxhat on the heap
-  // This should be large enough that we will have other problems if we run out
-  const uint ITERATIONS = hidden_dim / MAX_THREADS;
-  float4 *xhat = (float4*) malloc(ITERATIONS * sizeof(float4));
-  float4 *dxhat = (float4*) malloc(ITERATIONS * sizeof(float4));
-
-  const uint idx_y = blockIdx.x * blockDim.y + threadIdx.y;
-  if (idx_y >= rows) return;
-  const uint offset = idx_y * hidden_dim;
-  const float4 *inp_f4 = reinterpret_cast<const float4 *>(inp) + offset;
-  const T mean = means[idx_y];
-  const T rstd = rsqrt(vars[idx_y] + LN_EPSILON);
-  const float4 *out_grad_f4 = reinterpret_cast<const float4 *>(out_grad) + offset;
-  const float4 *gamma_f4 = reinterpret_cast<const float4 *>(gamma);
-  float4 *inp_grad_f4 = reinterpret_cast<float4 *>(inp_grad) + offset;
-
-  const uint idx = threadIdx.x;
-  float l_sums[2] = {0};
-  uint k = 0;
-  for (uint i = idx; i < hidden_dim; i += blockDim.x) {
-    // Step 1
-    const float4 y_j = out_grad_f4[i];
-    const float4 gamma_j = gamma_f4[i];
-    dxhat[k] = make_float4(
-      y_j.x * gamma_j.x,
-      y_j.y * gamma_j.y,
-      y_j.z * gamma_j.z,
-      y_j.w * gamma_j.w
-    );
-
-    // Step 2
-    const float4 inp_j = inp_f4[i];
-    xhat[k] = make_float4(
-      (inp_j.x - mean) * rstd,
-      (inp_j.y - mean) * rstd,
-      (inp_j.z - mean) * rstd,
-      (inp_j.w - mean) * rstd
-    );
-
-    // Step 3
-    l_sums[0] += dxhat[k].x + dxhat[k].y + dxhat[k].z + dxhat[k].w;
-    l_sums[1] += xhat[k].x * dxhat[k].x + xhat[k].y * dxhat[k].y + xhat[k].z * dxhat[k].z + xhat[k].w * dxhat[k].w;
-    k += 1;
-  }
-
-  blockReduce<ReduceType::kSum, 2>(l_sums);
-
-  // Step 4
-  // perform only one divide here to avoid repeated divides below
-  float rm = __fdividef(1.0f, hidden_dim << 2);
-  float sum_dxhat_m = __shfl_sync(WARP_REDUCE_MASK, l_sums[0], 0) * rm;
-  float sum_xhat_dxhat_m = __shfl_sync(WARP_REDUCE_MASK, l_sums[1], 0) * rm;
-  k = 0;
-  for (uint i = idx; i < hidden_dim; i += blockDim.x) {
-    inp_grad_f4[i] = make_float4(
-      (dxhat[k].x - sum_dxhat_m - xhat[k].x * sum_xhat_dxhat_m) * rstd,
-      (dxhat[k].y - sum_dxhat_m - xhat[k].y * sum_xhat_dxhat_m) * rstd,
-      (dxhat[k].z - sum_dxhat_m - xhat[k].z * sum_xhat_dxhat_m) * rstd,
-      (dxhat[k].w - sum_dxhat_m - xhat[k].w * sum_xhat_dxhat_m) * rstd
-    );
-    k += 1;
-  }
-  free(xhat);
-  free(dxhat);
   /// END ASSIGN4_2_2
 }
 extern "C" {
@@ -692,25 +440,8 @@ void launch_layernorm_bw(float *gamma_grad, float *betta_grad, float *inp_grad,
   hidden_dim >>= 2;
   int nthread = min(((hidden_dim + 31) / 32) * 32, MAX_THREADS);
   dim3 batch_grid_dim((batch_size + TILE_DIM - 1) / TILE_DIM);
-  if (1) {
-    ker_ln_bw_dinp_original<float><<<batch_size, nthread, 0, stream_2>>>(
-      d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
-  } else if (hidden_dim <= 128) {
-    ker_ln_bw_dinp<float><<<batch_grid_dim, block_dim, 0, stream_2>>>(
-      d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, batch_size, hidden_dim);
-  } else if (hidden_dim <= 256) {
-    ker_ln_bw_dinp_gt128<float, 2><<<batch_grid_dim, block_dim, 0, stream_2>>>(
-      d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, batch_size, hidden_dim);
-  } else if (hidden_dim <= 384) {
-    ker_ln_bw_dinp_gt128<float, 3><<<batch_grid_dim, block_dim, 0, stream_2>>>(
-      d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, batch_size, hidden_dim);
-  } else if (hidden_dim <= 512) {
-    ker_ln_bw_dinp_gt128<float, 4><<<batch_grid_dim, block_dim, 0, stream_2>>>(
-      d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, batch_size, hidden_dim);
-  } else {
-    ker_ln_bw_dinp_gt512<float><<<batch_grid_dim, block_dim, 0, stream_2>>>(
-      d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, batch_size, hidden_dim);
-  }
+  ker_ln_bw_dinp<float><<<batch_size, nthread, 0, stream_2>>>(
+    d_inp_grad, d_out_grad, d_inp, d_gamma, d_betta, d_vars, d_means, hidden_dim);
 
   // Synchronize and check for errors
   cudaDeviceSynchronize();
